@@ -1,0 +1,196 @@
+syntax = "proto3";
+package scribe;
+
+// Job status enumeration
+enum JobStatus {
+  JOB_STATUS_UNSPECIFIED = 0;
+  QUEUED = 1;
+  RUNNING = 2;
+  COMPLETED = 3;
+  FAILED = 4;
+  CANCELED = 5;
+}
+
+// Common empty message
+message Empty {}
+
+// Health check messages
+message HealthCheckRequest {}
+
+message HealthCheckResponse {
+  bool ok = 1;
+  string message = 2;
+}
+
+// Audio source with flexible input options
+message AudioSource {
+  oneof source {
+    string file_path = 1;
+    bytes inline_wav = 2;
+  }
+}
+
+// Transcription configuration options
+message TranscriptionOptions {
+  string model = 1;
+  bool enable_gpu = 2;
+  string language = 3;
+  bool translate_to_english = 4;
+  string initial_prompt = 5;
+  float vad_threshold = 6;
+  string compute_type = 7;
+}
+
+// Transcription segment
+message Segment {
+  int32 index = 1;
+  float start = 2;
+  float end = 3;
+  string text = 4;
+}
+
+// Transcription request/response messages
+message StartTranscriptionRequest {
+  string job_id = 1;
+  AudioSource audio = 2;
+  TranscriptionOptions options = 3;
+}
+
+message StartTranscriptionResponse {
+  string job_id = 1;
+  JobStatus status = 2;
+  string error = 3;
+}
+
+// Streaming transcription messages
+message StreamTranscriptionRequest {
+  string job_id = 1;
+}
+
+message TranscriptionEvent {
+  string job_id = 1;
+  JobStatus status = 2;
+  float progress = 3;
+  Segment segment = 4;
+  string error = 5;
+}
+
+// Job management messages
+message GetJobRequest {
+  string job_id = 1;
+}
+
+message GetJobResponse {
+  string job_id = 1;
+  JobStatus status = 2;
+  string error = 3;
+  float progress = 4;
+}
+
+message ListJobsRequest {}
+
+message JobSummary {
+  string job_id = 1;
+  JobStatus status = 2;
+  string error = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message ListJobsResponse {
+  repeated JobSummary jobs = 1;
+}
+
+message CancelJobRequest {
+  string job_id = 1;
+}
+
+message CancelJobResponse {
+  bool canceled = 1;
+}
+
+message DeleteJobRequest {
+  string job_id = 1;
+}
+
+message DeleteJobResponse {
+  bool deleted = 1;
+}
+
+// Settings management messages
+message Settings {
+  string models_dir = 1;
+  bool prefer_gpu = 2;
+  string default_model = 3;
+  string compute_type = 4;
+}
+
+message GetSettingsRequest {}
+
+message GetSettingsResponse {
+  Settings settings = 1;
+}
+
+message UpdateSettingsRequest {
+  Settings settings = 1;
+}
+
+message UpdateSettingsResponse {
+  Settings settings = 1;
+}
+
+// Model management messages
+message ModelInfo {
+  string name = 1;
+  string size = 2;
+  bool downloaded = 3;
+}
+
+message ListModelsRequest {}
+
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
+}
+
+message DownloadModelRequest {
+  string name = 1;
+}
+
+message DownloadModelResponse {
+  string name = 1;
+  bool started = 2;
+}
+
+message DeleteModelRequest {
+  string name = 1;
+}
+
+message DeleteModelResponse {
+  string name = 1;
+  bool deleted = 2;
+}
+
+// Main service definition
+service Scribe {
+  // Health and system
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+  
+  // Transcription operations
+  rpc StartTranscription(StartTranscriptionRequest) returns (StartTranscriptionResponse);
+  rpc StreamTranscription(StreamTranscriptionRequest) returns (stream TranscriptionEvent);
+  
+  // Job management
+  rpc GetJob(GetJobRequest) returns (GetJobResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+  rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse);
+  
+  // Settings management
+  rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
+  rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
+  
+  // Model management
+  rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
+  rpc DownloadModel(DownloadModelRequest) returns (DownloadModelResponse);
+  rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
+}

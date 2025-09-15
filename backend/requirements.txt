@@ -1,0 +1,12 @@
+grpcio==1.68.1
+grpcio-tools==1.68.1
+protobuf==5.29.2
+faster-whisper==1.1.0
+numpy==1.26.4
+tenacity==9.0.0
+pydantic==2.10.4
+psutil==6.1.1
+python-dotenv==1.0.1
+coloredlogs==15.0.1
+aiofiles==24.1.0
+nuitka==2.5.8

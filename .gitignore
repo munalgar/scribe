@@ -1,0 +1,203 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+.coverage
+*.cover
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+frontend/flutter/**/build/
+frontend/flutter/**/.dart_tool/
+frontend/flutter/**/.flutter-plugins
+frontend/flutter/**/.flutter-plugins-dependencies
+frontend/flutter/**/.packages
+frontend/flutter/**/.idea/
+frontend/flutter/**/.vscode/
+flutter_*.png
+linked_*.ds
+unlinked.ds
+unlinked_spec.ds
+.fvm/
+coverage/
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+*.swp
+.atom/
+.buildlog/
+.history
+.svn/
+
+# macOS specific
+**/macos/Flutter/ephemeral/
+**/macos/Flutter/GeneratedPluginRegistrant.swift
+**/ios/Flutter/Flutter.podspec
+
+# Windows specific
+**/windows/flutter/generated_plugin_registrant.cc
+**/windows/flutter/generated_plugin_registrant.h
+**/windows/flutter/generated_plugins.cmake
+
+# Linux specific
+**/linux/flutter/generated_plugin_registrant.cc
+**/linux/flutter/generated_plugin_registrant.h
+**/linux/flutter/generated_plugins.cmake
+
+# Android related (if needed in future)
+**/android/**/gradle-wrapper.jar
+**/android/.gradle
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+**/android/key.properties
+*.jks
+
+# iOS/XCode related (if needed in future)
+**/ios/**/*.mode1v3
+**/ios/**/*.mode2v3
+**/ios/**/*.moved-aside
+**/ios/**/*.pbxuser
+**/ios/**/*.perspectivev3
+**/ios/**/*sync/
+**/ios/**/.sconsign.dblite
+**/ios/**/.tags*
+**/ios/**/.vagrant/
+**/ios/**/DerivedData/
+**/ios/**/Icon?
+**/ios/**/Pods/
+**/ios/**/.symlinks/
+**/ios/**/profile
+**/ios/**/xcuserdata
+**/ios/.generated/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.flx
+**/ios/Flutter/app.zip
+**/ios/Flutter/flutter_assets/
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/ServiceDefinitions.json
+**/ios/Runner/GeneratedPluginRegistrant.*
+
+# Backend specific
+backend/.build/
+backend/.dist/
+backend/build/
+backend/dist/
+backend/*.spec
+backend/scribe_backend/proto/*.pyc
+backend/scribe_backend/proto/__pycache__/
+backend/data/
+
+# Nuitka build artifacts
+*.build/
+*.dist/
+*.onefile-build/
+Nuitka-Cache/
+.nuitka-dependency-cache/
+
+# gRPC generated files (Python)
+*_pb2.py
+*_pb2_grpc.py
+
+# gRPC generated files (Dart)
+*.pb.dart
+*.pbgrpc.dart
+*.pbjson.dart
+*.pbserver.dart
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+scribe.db
+
+# Model files (Whisper models)
+shared/models/
+shared/assets/generated/
+model_cache/
+*.pt
+*.pth
+*.onnx
+*.bin
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+config.local.json
+settings.local.json
+proto/.cache/
+
+# Coverage reports
+.coverage
+coverage.xml
+htmlcov/
+
+# Node (if needed)
+node_modules/
+
+# Exceptions - files that should be committed
+!proto/scribe.proto
