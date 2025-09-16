@@ -36,8 +36,8 @@ dependencies:
   cupertino_icons: ^1.0.8
   
   # gRPC and Protocol Buffers
-  grpc: ^4.0.1
-  protobuf: ^3.1.0
+  grpc: ^3.2.4
+  protobuf: ^2.1.0
   
   # SQLite for local storage
   sqlite3: ^2.5.0
