@@ -11,20 +11,20 @@ logger = logging.getLogger(__name__)
 class ModelManager:
     """Manages Whisper model downloads and caching"""
     
-    # Available Whisper models with their approximate sizes
+    # Available Whisper models with their approximate sizes in bytes
     AVAILABLE_MODELS = {
-        "tiny": "39 MB",
-        "tiny.en": "39 MB",
-        "base": "74 MB",
-        "base.en": "74 MB",
-        "small": "244 MB",
-        "small.en": "244 MB",
-        "medium": "769 MB",
-        "medium.en": "769 MB",
-        "large-v1": "1550 MB",
-        "large-v2": "1550 MB",
-        "large-v3": "1550 MB",
-        "large": "1550 MB",  # Alias for large-v3
+        "tiny": 39_000_000,      # ~39 MB
+        "tiny.en": 39_000_000,   # ~39 MB
+        "base": 74_000_000,      # ~74 MB
+        "base.en": 74_000_000,   # ~74 MB
+        "small": 244_000_000,    # ~244 MB
+        "small.en": 244_000_000, # ~244 MB
+        "medium": 769_000_000,   # ~769 MB
+        "medium.en": 769_000_000,# ~769 MB
+        "large-v1": 1_550_000_000,  # ~1.5 GB
+        "large-v2": 1_550_000_000,  # ~1.5 GB
+        "large-v3": 1_550_000_000,  # ~1.5 GB
+        "large": 1_550_000_000,      # ~1.5 GB (alias for large-v3)
     }
     
     def __init__(self, models_dir: Optional[str] = None):
@@ -103,13 +103,25 @@ class ModelManager:
             logger.info(f"Model {model_name} already downloaded")
             return str(self.get_model_path(model_name))
         
-        # Model will be downloaded automatically by faster-whisper
-        # when we try to load it for the first time
-        logger.info(f"Model {model_name} will be downloaded on first use")
-        
-        # Return the path where it should be stored
-        # faster-whisper will handle the actual download
-        return str(self.models_dir)
+        # Download the model using faster-whisper
+        try:
+            from faster_whisper import WhisperModel
+            logger.info(f"Downloading model {model_name}...")
+            
+            # This will download the model if not present
+            model = WhisperModel(
+                model_name,
+                device="cpu",  # Use CPU for download
+                compute_type="int8",
+                download_root=str(self.models_dir)
+            )
+            
+            logger.info(f"Model {model_name} downloaded successfully")
+            return str(self.get_model_path(model_name))
+            
+        except Exception as e:
+            logger.error(f"Failed to download model {model_name}: {e}")
+            return None
     
     def delete_model(self, model_name: str) -> bool:
         """

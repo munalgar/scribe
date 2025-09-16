@@ -142,7 +142,7 @@ message UpdateSettingsResponse {
 // Model management messages
 message ModelInfo {
   string name = 1;
-  string size = 2;
+  int64 size = 2;  // Size in bytes
   bool downloaded = 3;
 }
 

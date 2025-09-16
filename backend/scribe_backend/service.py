@@ -317,12 +317,28 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 f"Unknown model: {model_name}"
             )
         
-        # Note: Actual download happens when model is first used
-        # This just validates the model name
-        return scribe_pb2.DownloadModelResponse(
-            name=model_name,
-            started=True
-        )
+        # Check if already downloaded
+        if self.model_manager.is_model_downloaded(model_name):
+            logger.info(f"Model {model_name} already downloaded")
+            return scribe_pb2.DownloadModelResponse(
+                name=model_name,
+                started=False  # Already exists
+            )
+        
+        # Trigger download
+        logger.info(f"Starting download of model {model_name}")
+        model_path = self.model_manager.ensure_model(model_name)
+        
+        if model_path:
+            return scribe_pb2.DownloadModelResponse(
+                name=model_name,
+                started=True
+            )
+        else:
+            await context.abort(
+                grpc.StatusCode.INTERNAL,
+                f"Failed to download model {model_name}"
+            )
     
     async def DeleteModel(self, request, context):
         """Delete a downloaded model"""
