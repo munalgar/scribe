@@ -67,7 +67,7 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
     
     async def StartTranscription(self, request, context):
         """Start a new transcription job"""
-        logger.info(f"Starting transcription job")
+        logger.info(f"job_id={request.job_id or 'new'} StartTranscription received")
         
         # Extract audio path
         if not request.audio.HasField('file_path'):
@@ -147,8 +147,12 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         
         try:
             last_segment_idx = -1
+            last_heartbeat = 0.0
             
             while self.active_streams.get(job_id, False):
+                # Stop if client disconnected
+                if context.done():
+                    break
                 # Get current job status
                 job = await self.db.get_job(job_id)
                 if not job:
@@ -187,6 +191,14 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                     yield event
                     break
                 
+                # Periodic heartbeat (no new segments)
+                # Yield at least every second so clients see progress updates
+                import time as _time
+                now = _time.time()
+                if now - last_heartbeat >= 1.0:
+                    yield event
+                    last_heartbeat = now
+
                 # Wait before checking again
                 await asyncio.sleep(0.5)
                 

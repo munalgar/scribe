@@ -100,6 +100,27 @@ bash scripts/dev_backend.sh  # On Windows: powershell scripts/dev_backend.ps1
 bash scripts/dev_frontend.sh macos  # Or: windows, linux
 ```
 
+## ⚙️ Runtime Configuration and Behavior
+
+- **Backend host/port**: Configure where the gRPC server binds using environment variables.
+  - `SCRIBE_HOST` (default: `127.0.0.1`)
+  - `SCRIBE_PORT` (default: `50051`)
+  - Example:
+    ```bash
+    SCRIBE_HOST=0.0.0.0 SCRIBE_PORT=50052 bash scripts/dev_backend.sh
+    ```
+
+- **Database indexes**: On server startup the backend ensures a unique index on transcript segments to prevent duplicates:
+  - Unique index: `(job_id, idx)` on `transcript_segments`
+  - This runs automatically via a safe "create if not exists" step.
+
+- **Streaming heartbeat**: `StreamTranscription` now emits periodic heartbeat events (at least once per second) even when no new segments are produced. Clients can use these events to keep progress UIs responsive. Streams also terminate immediately if the client disconnects.
+
+- **Job status enums**: Internal status handling now uses the protobuf `JobStatus` enum end-to-end to avoid mismatches (e.g., `RUNNING`, `COMPLETED`, `FAILED`, `CANCELED`).
+
+- **Structured logging**: Logs include key fields to aid debugging and support log filtering:
+  - `job_id`, `device` and `compute_type` where applicable (e.g., `job_id=... Using device: cuda, compute_type: float16`).
+
 ## 🎙️ Usage
 
 1. **Start the backend server** - This runs the transcription engine

@@ -10,6 +10,19 @@ import time
 from faster_whisper import WhisperModel
 
 from ..db.dao import Database
+try:
+    # Prefer generated enums when available
+    from ..proto import scribe_pb2
+    JobStatusEnum = scribe_pb2.JobStatus
+except Exception:
+    # Fallback constants matching proto values
+    class JobStatusEnum:
+        JOB_STATUS_UNSPECIFIED = 0
+        QUEUED = 1
+        RUNNING = 2
+        COMPLETED = 3
+        FAILED = 4
+        CANCELED = 5
 from .gpu import get_device, get_compute_type
 from .model_manager import ModelManager
 
@@ -50,9 +63,9 @@ class TranscriptionEngine:
         Returns:
             True if successful, False otherwise
         """
-        logger.info(f"Starting transcription job {job_id}")
-        logger.info(f"Audio file: {audio_path}")
-        logger.info(f"Model: {model_name}, Language: {language}, Translate: {translate}")
+        logger.info(f"job_id={job_id} Starting transcription")
+        logger.info(f"job_id={job_id} Audio file: {audio_path}")
+        logger.info(f"job_id={job_id} Model: {model_name}, Language: {language}, Translate: {translate}")
         
         # Mark job as active
         self.active_jobs[job_id] = True
@@ -62,25 +75,25 @@ class TranscriptionEngine:
             if not os.path.exists(audio_path):
                 error_msg = f"Audio file not found: {audio_path}"
                 logger.error(error_msg)
-                await self.db.update_job_status(job_id, 4, error_msg)  # 4 = FAILED
+                await self.db.update_job_status(job_id, JobStatusEnum.FAILED, error_msg)
                 return False
             
             # Update status to RUNNING
-            await self.db.update_job_status(job_id, 2)  # 2 = RUNNING
+            await self.db.update_job_status(job_id, JobStatusEnum.RUNNING)
             
             # Ensure model is available
             model_path = self.model_manager.ensure_model(model_name)
             if not model_path:
                 error_msg = f"Failed to load model: {model_name}"
                 logger.error(error_msg)
-                await self.db.update_job_status(job_id, 4, error_msg)
+                await self.db.update_job_status(job_id, JobStatusEnum.FAILED, error_msg)
                 return False
             
             # Determine device and compute type
             device = get_device() if enable_gpu else "cpu"
             compute_type = get_compute_type(enable_gpu)
             
-            logger.info(f"Using device: {device}, compute_type: {compute_type}")
+            logger.info(f"job_id={job_id} Using device: {device}, compute_type: {compute_type}")
             
             # Load model
             try:
@@ -109,7 +122,7 @@ class TranscriptionEngine:
             audio_duration = self._get_audio_duration(audio_path)
             
             # Transcribe audio
-            logger.info("Starting transcription...")
+            logger.info(f"job_id={job_id} Starting transcription...")
             start_time = time.time()
             
             segments, info = model.transcribe(
@@ -133,7 +146,7 @@ class TranscriptionEngine:
                 if not self.active_jobs.get(job_id, False):
                     # Job was cancelled
                     logger.info(f"Job {job_id} was cancelled")
-                    await self.db.update_job_status(job_id, 5)  # 5 = CANCELED
+                    await self.db.update_job_status(job_id, JobStatusEnum.CANCELED)
                     return False
                 
                 segment_count += 1
@@ -146,18 +159,17 @@ class TranscriptionEngine:
             
             # Mark as completed
             elapsed_time = time.time() - start_time
-            logger.info(f"Transcription completed in {elapsed_time:.2f} seconds")
-            logger.info(f"Processed {segment_count} segments")
+            logger.info(f"job_id={job_id} Completed in {elapsed_time:.2f}s segments={segment_count}")
             
-            await self.db.update_job_status(job_id, 3)  # 3 = COMPLETED
+            await self.db.update_job_status(job_id, JobStatusEnum.COMPLETED)
             await self.db.update_job_progress(job_id, 1.0)
             
             return True
             
         except Exception as e:
             error_msg = f"Transcription failed: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            await self.db.update_job_status(job_id, 4, error_msg)  # 4 = FAILED
+            logger.exception(error_msg)
+            await self.db.update_job_status(job_id, JobStatusEnum.FAILED, error_msg)
             return False
             
         finally:

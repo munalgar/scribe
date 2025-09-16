@@ -54,6 +54,27 @@ def init_database():
         conn.close()
 
 
+def ensure_indexes():
+    """Ensure required indexes and constraints exist on the database."""
+    db_path = get_db_path()
+    conn = sqlite3.connect(str(db_path))
+    try:
+        # Unique constraint to prevent duplicate segment indexes per job
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_segments_job_id_idx_unique
+            ON transcript_segments(job_id, idx)
+            """
+        )
+        conn.commit()
+        logger.info("Database indexes ensured")
+    except Exception as e:
+        logger.error(f"Failed to ensure database indexes: {e}")
+        raise
+    finally:
+        conn.close()
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     init_database()

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import signal
 import sys
+import os
 from pathlib import Path
 
 import grpc
@@ -13,6 +14,7 @@ import coloredlogs
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scribe_backend.service import ScribeService
+from scribe_backend.db.init_db import ensure_indexes
 
 # Try to import generated proto files
 try:
@@ -34,6 +36,11 @@ async def serve():
     )
     
     logger.info("Starting Scribe backend server...")
+    # Ensure DB indexes exist
+    try:
+        ensure_indexes()
+    except Exception:
+        logger.exception("Failed ensuring database indexes")
     
     # Create server
     server = grpc.aio.server(
@@ -51,8 +58,10 @@ async def serve():
     else:
         logger.warning("Running without service (proto files not generated)")
     
-    # Listen on localhost only for security
-    listen_addr = '127.0.0.1:50051'
+    # Listen address configurable via env vars (defaults secure localhost)
+    host = os.environ.get('SCRIBE_HOST', '127.0.0.1')
+    port = int(os.environ.get('SCRIBE_PORT', '50051'))
+    listen_addr = f"{host}:{port}"
     server.add_insecure_port(listen_addr)
     
     logger.info(f"Server listening on {listen_addr}")
