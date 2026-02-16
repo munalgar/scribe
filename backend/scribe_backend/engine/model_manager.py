@@ -2,10 +2,59 @@
 
 import os
 import logging
+import threading
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Callable
+
+import huggingface_hub
+import requests
+from tqdm.auto import tqdm
 
 logger = logging.getLogger(__name__)
+
+# Map short model names to HuggingFace repo IDs (mirrors faster_whisper.utils._MODELS)
+_MODEL_REPOS = {
+    "tiny.en": "Systran/faster-whisper-tiny.en",
+    "tiny": "Systran/faster-whisper-tiny",
+    "base.en": "Systran/faster-whisper-base.en",
+    "base": "Systran/faster-whisper-base",
+    "small.en": "Systran/faster-whisper-small.en",
+    "small": "Systran/faster-whisper-small",
+    "medium.en": "Systran/faster-whisper-medium.en",
+    "medium": "Systran/faster-whisper-medium",
+    "large-v1": "Systran/faster-whisper-large-v1",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "large": "Systran/faster-whisper-large-v3",
+}
+
+_ALLOW_PATTERNS = [
+    "config.json",
+    "preprocessor_config.json",
+    "model.bin",
+    "tokenizer.json",
+    "vocabulary.*",
+]
+
+
+class DownloadCanceled(Exception):
+    """Raised when a model download is canceled by the user."""
+
+
+class _ProgressTqdm(tqdm):
+    """Custom tqdm that reports progress via a callback and supports cancellation."""
+
+    def __init__(self, *args, progress_callback=None, cancel_event=None, **kwargs):
+        self._progress_callback = progress_callback
+        self._cancel_event = cancel_event
+        super().__init__(*args, **kwargs)
+
+    def update(self, n=1):
+        if self._cancel_event and self._cancel_event.is_set():
+            raise DownloadCanceled("Download canceled by user")
+        super().update(n)
+        if self._progress_callback and self.total:
+            self._progress_callback(self.n, self.total)
 
 
 class ModelManager:
@@ -30,7 +79,7 @@ class ModelManager:
     def __init__(self, models_dir: Optional[str] = None):
         """
         Initialize model manager.
-        
+
         Args:
             models_dir: Directory to store models. If None, uses default.
         """
@@ -40,10 +89,13 @@ class ModelManager:
             # Default to shared/models in project root
             project_root = Path(__file__).parent.parent.parent.parent
             self.models_dir = project_root / "shared" / "models"
-        
+
         # Create models directory if it doesn't exist
         self.models_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Model directory: {self.models_dir}")
+
+        # Track active downloads for cancellation
+        self._active_downloads: Dict[str, threading.Event] = {}
     
     def get_model_path(self, model_name: str) -> Path:
         """Get the path where a model should be stored"""
@@ -123,6 +175,81 @@ class ModelManager:
             logger.error(f"Failed to download model {model_name}: {e}")
             return None
     
+    def download_model_with_progress(
+        self,
+        model_name: str,
+        progress_callback: Callable[[int, int], None],
+    ) -> str:
+        """Download a model with progress reporting.
+
+        Args:
+            model_name: Name of the model to download.
+            progress_callback: Called with (downloaded_bytes, total_bytes).
+
+        Returns:
+            Path to the downloaded model directory.
+
+        Raises:
+            ValueError: If the model name is unknown.
+            DownloadCanceled: If the download was canceled.
+        """
+        repo_id = _MODEL_REPOS.get(model_name)
+        if repo_id is None:
+            raise ValueError(f"Unknown model: {model_name}")
+
+        if self.is_model_downloaded(model_name):
+            size = self.AVAILABLE_MODELS.get(model_name, 0)
+            progress_callback(size, size)
+            return str(self.get_model_path(model_name))
+
+        cancel_event = threading.Event()
+        self._active_downloads[model_name] = cancel_event
+
+        # Create a proper tqdm subclass (not a factory function) so that
+        # huggingface_hub can call class-level methods like get_lock().
+        cb = progress_callback
+        ce = cancel_event
+
+        class _BoundProgressTqdm(_ProgressTqdm):
+            def __init__(self, *args, **kwargs):
+                kwargs.setdefault("progress_callback", cb)
+                kwargs.setdefault("cancel_event", ce)
+                super().__init__(*args, **kwargs)
+
+        output_dir = str(self.models_dir / model_name)
+        try:
+            huggingface_hub.snapshot_download(
+                repo_id,
+                local_dir=output_dir,
+                local_dir_use_symlinks=False,
+                allow_patterns=_ALLOW_PATTERNS,
+                tqdm_class=_BoundProgressTqdm,
+            )
+            logger.info(f"Model {model_name} downloaded successfully")
+            return output_dir
+        except DownloadCanceled:
+            logger.info(f"Download of model {model_name} canceled")
+            # Clean up partial download
+            import shutil
+            model_path = self.get_model_path(model_name)
+            if model_path.exists():
+                shutil.rmtree(model_path)
+            raise
+        finally:
+            self._active_downloads.pop(model_name, None)
+
+    def cancel_download(self, model_name: str) -> bool:
+        """Cancel an active download.
+
+        Returns:
+            True if a download was found and signaled to cancel.
+        """
+        cancel_event = self._active_downloads.get(model_name)
+        if cancel_event is not None:
+            cancel_event.set()
+            return True
+        return False
+
     def delete_model(self, model_name: str) -> bool:
         """
         Delete a downloaded model.

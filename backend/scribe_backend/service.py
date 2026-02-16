@@ -1,31 +1,16 @@
 """gRPC Service implementation for Scribe"""
 
 import asyncio
+import functools
 import logging
 import os
-from typing import AsyncIterator
 from pathlib import Path
+from typing import AsyncIterator, Dict, List, Optional, Tuple
 
 import grpc
 
-# Import generated protobuf classes (will be created by gen_proto.sh)
-try:
-    from .proto import scribe_pb2
-    from .proto import scribe_pb2_grpc
-except ImportError:
-    # Proto files not generated yet
-    import sys
-    sys.path.append(str(Path(__file__).parent.parent))
-    try:
-        from scribe_backend.proto import scribe_pb2
-        from scribe_backend.proto import scribe_pb2_grpc
-    except ImportError:
-        # Create dummy classes for initial development
-        class scribe_pb2:
-            pass
-        class scribe_pb2_grpc:
-            class ScribeServicer:
-                pass
+from .proto import scribe_pb2
+from .proto import scribe_pb2_grpc
 
 from .db.dao import Database
 from .engine.model_manager import ModelManager
@@ -33,20 +18,98 @@ from .engine.transcription import TranscriptionEngine
 
 logger = logging.getLogger(__name__)
 
+# Allowed audio/video file extensions (matches the Flutter frontend).
+_ALLOWED_EXTENSIONS = {'.wav', '.mp3', '.m4a', '.flac', '.ogg', '.mp4', '.webm'}
+
+# System directories that should never be read by the transcription engine.
+_BLOCKED_PREFIXES = (
+    '/etc', '/proc', '/sys', '/dev',
+    '/boot', '/sbin', '/bin', '/lib',
+)
+
+
+def _validate_audio_path(raw_path: str) -> Tuple[Optional[str], Optional[str]]:
+    """Sanitise and validate a user-supplied audio file path.
+
+    Returns:
+        (resolved_path, None) on success, or (None, error_message) on failure.
+    """
+    if not raw_path or not raw_path.strip():
+        return None, "Audio file path is empty"
+
+    # Require an absolute path — relative paths are ambiguous.
+    if not os.path.isabs(raw_path):
+        return None, "Audio file path must be absolute"
+
+    # Resolve '..' / symlinks to a canonical path to prevent traversal.
+    resolved = str(Path(raw_path).resolve())
+
+    # Block access to sensitive system directories.
+    for prefix in _BLOCKED_PREFIXES:
+        if resolved == prefix or resolved.startswith(prefix + os.sep):
+            return None, f"Access denied: path is inside a system directory"
+
+    # Check file extension.
+    ext = Path(resolved).suffix.lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        allowed = ', '.join(sorted(_ALLOWED_EXTENSIONS))
+        return None, f"Unsupported file type '{ext}'. Allowed: {allowed}"
+
+    # Must be a regular file (not a directory, device node, etc.).
+    if not os.path.isfile(resolved):
+        return None, f"Audio file not found: {resolved}"
+
+    return resolved, None
+
 
 class ScribeService(scribe_pb2_grpc.ScribeServicer):
     """Implementation of the Scribe gRPC service"""
-    
+
     def __init__(self):
         """Initialize the service with database and transcription engine"""
         self.db = Database()
         self.model_manager = ModelManager()
         self.engine = TranscriptionEngine(self.db, self.model_manager)
-        self.active_streams = {}
-        
-        # Start background task for managing streams
-        asyncio.create_task(self._cleanup_streams())
-    
+        self._background_tasks: set[asyncio.Task] = set()
+        # Event-driven streaming: job_id -> list of subscriber queues
+        self._job_subscribers: Dict[str, List[asyncio.Queue]] = {}
+
+    async def start(self):
+        """Start background tasks. Must be called after the event loop is running."""
+        recovered = await self.db.fail_stale_jobs()
+        if recovered:
+            logger.warning(
+                f"Recovered {recovered} stale job(s) from previous run "
+                f"(marked as FAILED)"
+            )
+
+    def _subscribe(self, job_id: str) -> asyncio.Queue:
+        """Add a subscriber queue for a job's events."""
+        queue = asyncio.Queue()
+        self._job_subscribers.setdefault(job_id, []).append(queue)
+        return queue
+
+    def _unsubscribe(self, job_id: str, queue: asyncio.Queue):
+        """Remove a subscriber queue and clean up if no subscribers remain."""
+        subs = self._job_subscribers.get(job_id)
+        if subs:
+            try:
+                subs.remove(queue)
+            except ValueError:
+                pass
+            if not subs:
+                del self._job_subscribers[job_id]
+
+    def _publish(self, job_id: str, event: scribe_pb2.TranscriptionEvent):
+        """Push an event to all subscribers of a job. None signals end-of-stream."""
+        for queue in self._job_subscribers.get(job_id, []):
+            queue.put_nowait(event)
+
+    def _publish_end(self, job_id: str):
+        """Signal all subscribers that no more events will be sent."""
+        for queue in self._job_subscribers.get(job_id, []):
+            queue.put_nowait(None)
+
     async def HealthCheck(self, request, context):
         """Check if the service is healthy"""
         logger.info("Health check requested")
@@ -67,7 +130,7 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
     
     async def StartTranscription(self, request, context):
         """Start a new transcription job"""
-        logger.info(f"Starting transcription job")
+        logger.info("Starting transcription job")
         
         # Extract audio path
         if not request.audio.HasField('file_path'):
@@ -75,16 +138,13 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 grpc.StatusCode.INVALID_ARGUMENT,
                 "Only file_path audio source is supported"
             )
-            
-        audio_path = request.audio.file_path
-        
-        # Validate file exists
-        if not os.path.exists(audio_path):
-            await context.abort(
-                grpc.StatusCode.NOT_FOUND,
-                f"Audio file not found: {audio_path}"
-            )
-        
+            return
+
+        audio_path, error = _validate_audio_path(request.audio.file_path)
+        if error:
+            await context.abort(grpc.StatusCode.INVALID_ARGUMENT, error)
+            return
+
         # Generate job ID if not provided
         job_id = request.job_id if request.job_id else await self.db.new_job_id()
         
@@ -110,9 +170,32 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 grpc.StatusCode.INTERNAL,
                 "Failed to create job in database"
             )
-        
+            return
+
+        # Build event callback that converts engine events to protobuf
+        # and publishes them to all stream subscribers.
+        def _on_engine_event(jid: str, event: dict):
+            proto_event = scribe_pb2.TranscriptionEvent(
+                job_id=jid,
+                status=event['status'],
+                progress=event.get('progress', 0.0),
+            )
+            if event.get('error'):
+                proto_event.error = event['error']
+            seg = event.get('segment')
+            if seg:
+                proto_event.segment.CopyFrom(scribe_pb2.Segment(
+                    index=seg['idx'],
+                    start=seg['start'],
+                    end=seg['end'],
+                    text=seg['text'],
+                ))
+            self._publish(jid, proto_event)
+            if event.get('final'):
+                self._publish_end(jid)
+
         # Start transcription in background
-        asyncio.create_task(
+        task = asyncio.create_task(
             self.engine.run_job(
                 job_id=job_id,
                 audio_path=audio_path,
@@ -120,9 +203,13 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 language=language,
                 translate=translate,
                 initial_prompt=initial_prompt,
-                enable_gpu=enable_gpu
+                enable_gpu=enable_gpu,
+                on_event=_on_engine_event,
             )
         )
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._on_task_done)
         
         return scribe_pb2.StartTranscriptionResponse(
             job_id=job_id,
@@ -130,10 +217,10 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         )
     
     async def StreamTranscription(self, request, context) -> AsyncIterator:
-        """Stream transcription events for a job"""
+        """Stream transcription events for a job using an event-driven queue."""
         job_id = request.job_id
         logger.info(f"Streaming transcription for job {job_id}")
-        
+
         # Check if job exists
         job = await self.db.get_job(job_id)
         if not job:
@@ -141,69 +228,63 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 grpc.StatusCode.NOT_FOUND,
                 f"Job not found: {job_id}"
             )
-        
-        # Track this stream
-        self.active_streams[job_id] = True
-        
-        try:
-            last_segment_idx = -1
-            
-            while self.active_streams.get(job_id, False):
-                # Get current job status
-                job = await self.db.get_job(job_id)
-                if not job:
-                    break
-                
-                # Send status update
-                event = scribe_pb2.TranscriptionEvent(
+            return
+
+        # If the job already finished before the client subscribed, replay
+        # the final state from the DB and return immediately.
+        terminal_statuses = [
+            scribe_pb2.JobStatus.COMPLETED,
+            scribe_pb2.JobStatus.FAILED,
+            scribe_pb2.JobStatus.CANCELED,
+        ]
+        if job['status'] in terminal_statuses:
+            # Replay all segments then the terminal event
+            segments = await self.db.get_segments(job_id)
+            for seg in segments:
+                yield scribe_pb2.TranscriptionEvent(
                     job_id=job_id,
                     status=job['status'],
-                    progress=job.get('progress', 0.0)
+                    progress=job.get('progress', 0.0),
+                    segment=scribe_pb2.Segment(
+                        index=seg['idx'],
+                        start=seg['start'],
+                        end=seg['end'],
+                        text=seg['text'],
+                    ),
                 )
-                
-                if job.get('error'):
-                    event.error = job['error']
-                
-                # Get new segments
-                segments = await self.db.get_segments(job_id)
-                for segment in segments:
-                    if segment['idx'] > last_segment_idx:
-                        segment_event = scribe_pb2.TranscriptionEvent(
-                            job_id=job_id,
-                            status=job['status'],
-                            progress=job.get('progress', 0.0),
-                            segment=scribe_pb2.Segment(
-                                index=segment['idx'],
-                                start=segment['start'],
-                                end=segment['end'],
-                                text=segment['text']
-                            )
-                        )
-                        yield segment_event
-                        last_segment_idx = segment['idx']
-                
-                # Check if job is terminal
-                if job['status'] in [3, 4, 5]:  # COMPLETED, FAILED, CANCELED
-                    yield event
+            final = scribe_pb2.TranscriptionEvent(
+                job_id=job_id,
+                status=job['status'],
+                progress=job.get('progress', 0.0),
+            )
+            if job.get('error'):
+                final.error = job['error']
+            yield final
+            return
+
+        # Subscribe to live events
+        queue = self._subscribe(job_id)
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    # End-of-stream sentinel
                     break
-                
-                # Wait before checking again
-                await asyncio.sleep(0.5)
-                
+                yield event
         finally:
-            # Clean up stream tracking
-            self.active_streams.pop(job_id, None)
+            self._unsubscribe(job_id, queue)
     
     async def GetJob(self, request, context):
         """Get information about a specific job"""
         job = await self.db.get_job(request.job_id)
-        
+
         if not job:
             await context.abort(
                 grpc.StatusCode.NOT_FOUND,
                 f"Job not found: {request.job_id}"
             )
-        
+            return
+
         response = scribe_pb2.GetJobResponse(
             job_id=job['job_id'],
             status=job['status'],
@@ -241,7 +322,7 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         if not cancelled:
             # Job might not be running, update status in DB
             job = await self.db.get_job(request.job_id)
-            if job and job['status'] in [1, 2]:  # QUEUED or RUNNING
+            if job and job['status'] in [scribe_pb2.JobStatus.QUEUED, scribe_pb2.JobStatus.RUNNING]:
                 await self.db.cancel_job(request.job_id)
                 cancelled = True
         
@@ -251,6 +332,39 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         """Delete a job and its data"""
         deleted = await self.db.delete_job(request.job_id)
         return scribe_pb2.DeleteJobResponse(deleted=deleted)
+
+    async def GetTranscript(self, request, context):
+        """Get full transcript with segments for a completed job"""
+        job = await self.db.get_job(request.job_id)
+
+        if not job:
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND,
+                f"Job not found: {request.job_id}"
+            )
+            return
+
+        segments = await self.db.get_segments(request.job_id)
+
+        proto_segments = [
+            scribe_pb2.Segment(
+                index=seg['idx'],
+                start=seg['start'],
+                end=seg['end'],
+                text=seg['text']
+            )
+            for seg in segments
+        ]
+
+        return scribe_pb2.GetTranscriptResponse(
+            job_id=job['job_id'],
+            status=job['status'],
+            segments=proto_segments,
+            audio_path=job.get('audio_path', ''),
+            model=job.get('model', ''),
+            language=job.get('language', ''),
+            created_at=job.get('created_at', '')
+        )
     
     async def GetSettings(self, request, context):
         """Get application settings"""
@@ -278,10 +392,11 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         # Save settings to database
         if settings.models_dir:
             await self.db.set_setting('models_dir', settings.models_dir)
-            # Update model manager
+            # Update model manager and propagate to engine
             self.model_manager = ModelManager(settings.models_dir)
+            self.engine.model_manager = self.model_manager
             
-        await self.db.set_setting('prefer_gpu', str(settings.prefer_gpu))
+        await self.db.set_setting('prefer_gpu', str(settings.prefer_gpu).lower())
         
         if settings.default_model:
             await self.db.set_setting('default_model', settings.default_model)
@@ -307,39 +422,124 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         
         return response
     
-    async def DownloadModel(self, request, context):
-        """Start downloading a model"""
+    async def DownloadModel(self, request, context) -> AsyncIterator:
+        """Stream model download progress"""
         model_name = request.name
-        
+
         if model_name not in self.model_manager.AVAILABLE_MODELS:
             await context.abort(
                 grpc.StatusCode.NOT_FOUND,
                 f"Unknown model: {model_name}"
             )
-        
+            return
+
         # Check if already downloaded
         if self.model_manager.is_model_downloaded(model_name):
             logger.info(f"Model {model_name} already downloaded")
-            return scribe_pb2.DownloadModelResponse(
+            size = self.model_manager.AVAILABLE_MODELS[model_name]
+            yield scribe_pb2.DownloadModelProgress(
                 name=model_name,
-                started=False  # Already exists
+                status=scribe_pb2.DOWNLOAD_COMPLETE,
+                downloaded_bytes=size,
+                total_bytes=size,
             )
-        
-        # Trigger download
-        logger.info(f"Starting download of model {model_name}")
-        model_path = self.model_manager.ensure_model(model_name)
-        
-        if model_path:
-            return scribe_pb2.DownloadModelResponse(
-                name=model_name,
-                started=True
+            return
+
+        yield scribe_pb2.DownloadModelProgress(
+            name=model_name,
+            status=scribe_pb2.DOWNLOAD_STARTING,
+            total_bytes=self.model_manager.AVAILABLE_MODELS.get(model_name, 0),
+        )
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def progress_callback(downloaded: int, total: int):
+            loop.call_soon_threadsafe(
+                queue.put_nowait, (downloaded, total)
             )
-        else:
-            await context.abort(
-                grpc.StatusCode.INTERNAL,
-                f"Failed to download model {model_name}"
-            )
-    
+
+        from .engine.model_manager import DownloadCanceled
+
+        download_future = loop.run_in_executor(
+            None,
+            functools.partial(
+                self.model_manager.download_model_with_progress,
+                model_name,
+                progress_callback,
+            ),
+        )
+
+        try:
+            # Yield progress events until the download finishes
+            while True:
+                # Wait for either a progress update or the download to finish
+                get_task = asyncio.ensure_future(queue.get())
+                done, _ = await asyncio.wait(
+                    [get_task, download_future],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if get_task in done:
+                    downloaded, total = get_task.result()
+                    yield scribe_pb2.DownloadModelProgress(
+                        name=model_name,
+                        status=scribe_pb2.DOWNLOAD_DOWNLOADING,
+                        downloaded_bytes=downloaded,
+                        total_bytes=total,
+                    )
+                else:
+                    get_task.cancel()
+
+                if download_future.done():
+                    # Drain any remaining progress events
+                    while not queue.empty():
+                        downloaded, total = queue.get_nowait()
+                        yield scribe_pb2.DownloadModelProgress(
+                            name=model_name,
+                            status=scribe_pb2.DOWNLOAD_DOWNLOADING,
+                            downloaded_bytes=downloaded,
+                            total_bytes=total,
+                        )
+                    break
+
+            # Check download result
+            try:
+                download_future.result()
+                yield scribe_pb2.DownloadModelProgress(
+                    name=model_name,
+                    status=scribe_pb2.DOWNLOAD_COMPLETE,
+                    downloaded_bytes=self.model_manager.AVAILABLE_MODELS.get(model_name, 0),
+                    total_bytes=self.model_manager.AVAILABLE_MODELS.get(model_name, 0),
+                )
+            except DownloadCanceled:
+                yield scribe_pb2.DownloadModelProgress(
+                    name=model_name,
+                    status=scribe_pb2.DOWNLOAD_CANCELED,
+                )
+            except Exception as e:
+                logger.error(f"Download failed for {model_name}: {e}")
+                yield scribe_pb2.DownloadModelProgress(
+                    name=model_name,
+                    status=scribe_pb2.DOWNLOAD_FAILED,
+                    error=str(e),
+                )
+        except Exception as e:
+            # Client disconnected (broken pipe) or other stream error.
+            # Cancel the download so it doesn't keep running in the background.
+            logger.warning(f"Client disconnected during download of {model_name}: {e}")
+            self.model_manager.cancel_download(model_name)
+            if not download_future.done():
+                try:
+                    await download_future
+                except Exception:
+                    pass
+
+    async def CancelDownload(self, request, context):
+        """Cancel an active model download"""
+        canceled = self.model_manager.cancel_download(request.name)
+        return scribe_pb2.CancelDownloadResponse(canceled=canceled)
+
     async def DeleteModel(self, request, context):
         """Delete a downloaded model"""
         deleted = self.model_manager.delete_model(request.name)
@@ -349,9 +549,11 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
             deleted=deleted
         )
     
-    async def _cleanup_streams(self):
-        """Periodically clean up inactive streams"""
-        while True:
-            await asyncio.sleep(60)  # Check every minute
-            # Clean up any streams that have been inactive
-            # This is a placeholder for more sophisticated cleanup
+    @staticmethod
+    def _on_task_done(task: asyncio.Task):
+        """Log unhandled exceptions from background transcription tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(f"Background transcription task failed: {exc}", exc_info=exc)

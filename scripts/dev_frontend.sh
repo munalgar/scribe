@@ -2,7 +2,6 @@
 set -euo pipefail
 
 # Colors for output
-RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
@@ -19,8 +18,8 @@ export PATH="$HOME/flutter/bin:$HOME/.pub-cache/bin:$PATH"
 
 cd "$FLUTTER_APP"
 
-# Check if dependencies are installed
-if [ ! -d ".dart_tool" ]; then
+# Check if dependencies need to be fetched
+if [ ! -d ".dart_tool" ] || [ "pubspec.yaml" -nt "pubspec.lock" ]; then
     echo -e "${YELLOW}Installing Flutter dependencies...${NC}"
     flutter pub get
 fi

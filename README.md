@@ -1,15 +1,6 @@
-# Scribe - Privacy-First Audio Transcription
+# Scribe - Audio Transcription
 
-A cross-platform desktop application for high-performance, offline audio transcription that respects your privacy.
-
-## 🎯 Key Features
-
-- **100% Offline**: All processing happens on your machine - no internet required after initial model download
-- **Privacy-First**: No telemetry, no data collection, your audio never leaves your device
-- **GPU Acceleration**: Supports NVIDIA CUDA, Apple Silicon Metal, AMD ROCm, and DirectML
-- **Cross-Platform**: Works on Windows, macOS, and Linux
-- **High Performance**: Built with faster-whisper for optimized transcription
-- **Native UI**: Flutter-based desktop application with responsive interface
+A cross-platform desktop application for high-performance, offline audio transcription.
 
 ## 🏗️ Architecture
 
@@ -32,6 +23,7 @@ A cross-platform desktop application for high-performance, offline audio transcr
 ## 📋 Prerequisites
 
 ### macOS
+
 - Python 3.10+ with pip
 - FFmpeg (`brew install ffmpeg`)
 - Protocol Buffers compiler (`brew install protobuf`)
@@ -39,6 +31,7 @@ A cross-platform desktop application for high-performance, offline audio transcr
 - Xcode Command Line Tools
 
 ### Windows
+
 - Python 3.10+ with pip
 - FFmpeg (download from ffmpeg.org)
 - Protocol Buffers compiler (download from GitHub releases)
@@ -46,6 +39,7 @@ A cross-platform desktop application for high-performance, offline audio transcr
 - Visual Studio 2022 with C++ desktop development
 
 ### Linux
+
 - Python 3.10+ with pip
 - FFmpeg (`sudo apt install ffmpeg`)
 - Protocol Buffers compiler (`sudo apt install protobuf-compiler`)
@@ -55,8 +49,9 @@ A cross-platform desktop application for high-performance, offline audio transcr
 ## 🚀 Quick Start
 
 ### 1. Clone the repository
+
 ```bash
-git clone https://github.com/yourusername/scribe.git
+git clone https://github.com/munalgar/scribe.git
 cd scribe
 ```
 
@@ -91,11 +86,13 @@ flutter pub get
 ### 4. Run the application
 
 **Terminal 1 - Start the backend:**
+
 ```bash
 bash scripts/dev_backend.sh  # On Windows: powershell scripts/dev_backend.ps1
 ```
 
 **Terminal 2 - Start the frontend:**
+
 ```bash
 bash scripts/dev_frontend.sh macos  # Or: windows, linux
 ```
@@ -111,25 +108,30 @@ bash scripts/dev_frontend.sh macos  # Or: windows, linux
 ## 🚀 GPU Acceleration
 
 ### NVIDIA GPUs (CUDA)
+
 - Install CUDA Toolkit 11.8 or 12.x
 - Install cuDNN 8.x
 - The backend will automatically detect and use CUDA
 
 ### Apple Silicon (Metal)
+
 - Works automatically on M1/M2/M3 Macs
 - No additional setup required
 
 ### AMD GPUs (ROCm)
+
 - Linux only: Install ROCm toolkit
 - Set environment variable: `export HSA_OVERRIDE_GFX_VERSION=10.3.0`
 
 ### Windows (DirectML)
+
 - Supports AMD, Intel, and NVIDIA GPUs
 - Install DirectML runtime (comes with Windows 10 1903+)
 
 ## 📦 Model Management
 
 Whisper models are downloaded automatically on first use:
+
 - **tiny** (~39 MB) - Fastest, lower accuracy
 - **base** (~74 MB) - Good balance
 - **small** (~244 MB) - Better accuracy
@@ -141,11 +143,13 @@ Models are cached in `shared/models/` for offline use.
 ## 🏗️ Building for Distribution
 
 ### Backend (Python to executable)
+
 ```bash
 bash scripts/build_backend_nuitka.sh
 ```
 
 ### Frontend (Flutter)
+
 ```bash
 cd frontend/flutter/scribe_app
 
@@ -162,39 +166,56 @@ flutter build linux
 ## 🔧 Troubleshooting
 
 ### Backend won't start
+
 - Check Python version: `python3 --version` (needs 3.10+)
 - Verify virtual environment is activated
 - Check port 50051 is not in use
 
 ### Frontend connection issues
+
 - Ensure backend is running first
 - Check firewall isn't blocking localhost:50051
 - Verify gRPC code generation completed successfully
 
 ### GPU not detected
+
 - Check CUDA installation: `nvidia-smi`
 - Verify PyTorch CUDA support: `python -c "import torch; print(torch.cuda.is_available())"`
 - Try CPU mode by setting compute_type to "int8"
 
 ### Model download fails
+
 - Check disk space (need 2-3 GB free)
 - Verify internet connection for initial download
 - Try smaller model first (tiny or base)
 
-## 🤝 Contributing
+## � Testing
+
+### Backend Tests
+
+Basic sanity checks for backend components:
+
+```bash
+python3 tests/test_backend.py
+python3 tests/test_server.py
+```
+
+### Frontend Tests
+
+Run Flutter widget tests:
+
+```bash
+cd frontend/flutter/scribe_app
+flutter test
+```
+
+## �🤝 Contributing
 
 We welcome contributions! Please see CONTRIBUTING.md for guidelines.
 
 ## 📄 License
 
 This project is licensed under the MIT License - see LICENSE file for details.
-
-## 🔒 Privacy Promise
-
-- **No telemetry**: We don't track usage or collect analytics
-- **No cloud services**: Everything runs locally on your machine
-- **No accounts**: No registration or sign-in required
-- **Your data stays yours**: Audio files and transcripts never leave your device
 
 ## 🙏 Acknowledgments
 

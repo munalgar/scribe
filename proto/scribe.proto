@@ -117,6 +117,21 @@ message DeleteJobResponse {
   bool deleted = 1;
 }
 
+// Transcript retrieval messages
+message GetTranscriptRequest {
+  string job_id = 1;
+}
+
+message GetTranscriptResponse {
+  string job_id = 1;
+  JobStatus status = 2;
+  repeated Segment segments = 3;
+  string audio_path = 4;
+  string model = 5;
+  string language = 6;
+  string created_at = 7;
+}
+
 // Settings management messages
 message Settings {
   string models_dir = 1;
@@ -156,9 +171,29 @@ message DownloadModelRequest {
   string name = 1;
 }
 
-message DownloadModelResponse {
+enum DownloadStatus {
+  DOWNLOAD_STATUS_UNSPECIFIED = 0;
+  DOWNLOAD_STARTING = 1;
+  DOWNLOAD_DOWNLOADING = 2;
+  DOWNLOAD_COMPLETE = 3;
+  DOWNLOAD_FAILED = 4;
+  DOWNLOAD_CANCELED = 5;
+}
+
+message DownloadModelProgress {
   string name = 1;
-  bool started = 2;
+  DownloadStatus status = 2;
+  int64 downloaded_bytes = 3;
+  int64 total_bytes = 4;
+  string error = 5;
+}
+
+message CancelDownloadRequest {
+  string name = 1;
+}
+
+message CancelDownloadResponse {
+  bool canceled = 1;
 }
 
 message DeleteModelRequest {
@@ -184,13 +219,15 @@ service Scribe {
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
   rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse);
-  
+  rpc GetTranscript(GetTranscriptRequest) returns (GetTranscriptResponse);
+
   // Settings management
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
   rpc UpdateSettings(UpdateSettingsRequest) returns (UpdateSettingsResponse);
   
   // Model management
   rpc ListModels(ListModelsRequest) returns (ListModelsResponse);
-  rpc DownloadModel(DownloadModelRequest) returns (DownloadModelResponse);
+  rpc DownloadModel(DownloadModelRequest) returns (stream DownloadModelProgress);
+  rpc CancelDownload(CancelDownloadRequest) returns (CancelDownloadResponse);
   rpc DeleteModel(DeleteModelRequest) returns (DeleteModelResponse);
 }

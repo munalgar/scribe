@@ -3,24 +3,12 @@
 import asyncio
 import logging
 import signal
-import sys
-from pathlib import Path
 
 import grpc
 import coloredlogs
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
+from scribe_backend.proto import scribe_pb2_grpc
 from scribe_backend.service import ScribeService
-
-# Try to import generated proto files
-try:
-    from scribe_backend.proto import scribe_pb2_grpc
-except ImportError:
-    logger = logging.getLogger(__name__)
-    logger.warning("Proto files not generated yet. Run scripts/gen_proto.sh first.")
-    scribe_pb2_grpc = None
 
 logger = logging.getLogger(__name__)
 
@@ -40,16 +28,18 @@ async def serve():
         options=[
             ('grpc.max_send_message_length', 50 * 1024 * 1024),  # 50MB
             ('grpc.max_receive_message_length', 50 * 1024 * 1024),  # 50MB
+            ('grpc.keepalive_time_ms', 30_000),  # Send keepalive ping every 30s
+            ('grpc.keepalive_timeout_ms', 10_000),  # Wait 10s for ping ack
+            ('grpc.keepalive_permit_without_calls', 1),  # Allow pings with no active RPCs
+            ('grpc.http2.min_ping_interval_without_data_ms', 30_000),
         ]
     )
     
     # Register the service
-    if scribe_pb2_grpc:
-        service = ScribeService()
-        scribe_pb2_grpc.add_ScribeServicer_to_server(service, server)
-        logger.info("Scribe service registered")
-    else:
-        logger.warning("Running without service (proto files not generated)")
+    service = ScribeService()
+    await service.start()
+    scribe_pb2_grpc.add_ScribeServicer_to_server(service, server)
+    logger.info("Scribe service registered")
     
     # Listen on localhost only for security
     listen_addr = '127.0.0.1:50051'
@@ -60,13 +50,13 @@ async def serve():
     # Start server
     await server.start()
     
-    # Handle shutdown gracefully
-    def signal_handler(sig, frame):
-        logger.info("Shutting down server...")
-        asyncio.create_task(server.stop(5))
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Handle shutdown gracefully using loop-aware signal handlers
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(
+            sig,
+            lambda: asyncio.create_task(server.stop(5))
+        )
     
     try:
         await server.wait_for_termination()
@@ -82,4 +72,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # When run directly, ensure the package is importable
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
     main()
