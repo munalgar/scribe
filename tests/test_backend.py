@@ -77,11 +77,12 @@ async def test_backend():
     print("\n3. Model Manager:")
     try:
         mm = ModelManager()
-        models = mm.list_models()
+        models = mm.list_available_models()
         print(f"   Found {len(models)} model(s)")
         for model in models:
             status = "Downloaded" if model.get("downloaded", False) else "Not downloaded"
-            print(f"   [{status}] {model.get('name', 'unknown')} ({model.get('size', 'unknown')})")
+            size_mb = model.get("size", 0) / (1024 * 1024)
+            print(f"   [{status}] {model.get('name', 'unknown')} ({size_mb:.0f} MB)")
     except Exception as e:
         print(f"   Model manager error: {e}")
 
@@ -94,7 +95,7 @@ async def test_backend():
             try:
                 importlib.import_module(f"{proto_base}.scribe_pb2")
                 importlib.import_module(f"{proto_base}.scribe_pb2_grpc")
-                print("   ✓ Proto files imported successfully")
+                print("   [OK] Proto files imported successfully")
                 break
             except ModuleNotFoundError:
                 continue
@@ -103,7 +104,7 @@ async def test_backend():
                 "Could not import proto modules from either 'backend.scribe_backend.proto' or 'scribe_backend.proto'"
             )
     except ImportError as e:
-        print(f"   ✗ Proto import failed: {e}")
+        print(f"   [FAIL] Proto import failed: {e}")
 
     print("\n" + "=" * 60)
     print("Test complete!")

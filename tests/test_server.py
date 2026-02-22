@@ -43,13 +43,16 @@ async def test_server():
     """Test server startup"""
     print("Testing server startup...")
 
-    # Start server
-
-    # Run for 2 seconds then stop
+    # Run for 2 seconds then stop (TimeoutError = server started successfully)
     try:
         await asyncio.wait_for(serve(), timeout=2.0)
     except asyncio.TimeoutError:
         print("Server started successfully (timed out as expected)")
+    except RuntimeError as e:
+        if "bind" in str(e).lower() or "50051" in str(e):
+            print("Port 50051 in use - skipping (stop backend or other process using the port)")
+            return
+        raise
     except Exception as e:
         print(f"Server error: {e}")
         raise
