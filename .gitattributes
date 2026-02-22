@@ -1,2 +1,30 @@
-*.sh text eol=lf
-*.ps1 text eol=crlf
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Explicitly declare text files
+*.dart text
+*.py text
+*.proto text
+*.yaml text
+*.yml text
+*.json text
+*.md text
+*.sh text
+*.ps1 text
+*.bat text
+*.cmake text
+*.gradle text
+*.xml text
+
+# Denote binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.gif binary
+*.webp binary
+*.db binary
+*.pt binary
+*.pth binary
+*.onnx binary
+*.bin binary

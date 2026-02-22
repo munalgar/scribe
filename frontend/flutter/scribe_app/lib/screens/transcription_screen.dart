@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import '../providers/connection_provider.dart';
 import '../providers/transcription_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/app_preferences.dart';
 import '../widgets/idle_transcription_view.dart';
 import '../widgets/transcription_result_view.dart';
 
@@ -27,10 +28,21 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
 
   late final Player _audioPlayer;
 
+  bool _prefsLoaded = false;
+
   @override
   void initState() {
     super.initState();
     _audioPlayer = Player();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_prefsLoaded) {
+      _prefsLoaded = true;
+      _language = context.read<AppPreferences>().defaultLanguage;
+    }
   }
 
   @override

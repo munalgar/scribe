@@ -356,14 +356,12 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
-            child: Row(
-              mainAxisAlignment: _isUtilitySidebarCollapsed
-                  ? MainAxisAlignment.center
-                  : MainAxisAlignment.spaceBetween,
-              children: [
-                if (!_isUtilitySidebarCollapsed)
+          if (!_isUtilitySidebarCollapsed) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
                   Text(
                     'Utilities',
                     style: theme.textTheme.labelSmall?.copyWith(
@@ -372,33 +370,40 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                       letterSpacing: 0.3,
                     ),
                   ),
-                IconButton(
-                  tooltip: _isUtilitySidebarCollapsed
-                      ? 'Expand utility sidebar'
-                      : 'Collapse utility sidebar',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () {
-                    setState(() {
-                      _isUtilitySidebarCollapsed = !_isUtilitySidebarCollapsed;
-                    });
-                  },
-                  icon: const Icon(Icons.tune_rounded, size: 20),
-                ),
-              ],
+                  IconButton(
+                    tooltip: 'Collapse utility sidebar',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      setState(() {
+                        _isUtilitySidebarCollapsed = true;
+                      });
+                    },
+                    icon: const Icon(Icons.tune_rounded, size: 20),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Divider(
-            color: theme.colorScheme.outlineVariant,
-            height: 1,
-          ),
+            Divider(
+              color: theme.colorScheme.outlineVariant,
+              height: 1,
+            ),
+          ],
           if (_isUtilitySidebarCollapsed)
             Expanded(
               child: Center(
-                child: Icon(
-                  Icons.tune_rounded,
-                  size: 18,
-                  color: theme.colorScheme.onSurfaceVariant.withValues(
-                    alpha: 0.65,
+                child: IconButton(
+                  tooltip: 'Expand utility sidebar',
+                  onPressed: () {
+                    setState(() {
+                      _isUtilitySidebarCollapsed = false;
+                    });
+                  },
+                  icon: Icon(
+                    Icons.tune_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant.withValues(
+                      alpha: 0.65,
+                    ),
                   ),
                 ),
               ),
@@ -477,21 +482,26 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                       ),
                     ),
                   ),
-                  _buildInfoRow('Segments', '${displaySegments.length}', theme),
+                  _buildInfoRow(
+                    'Segments',
+                    '${displaySegments.length}',
+                    theme,
+                    wrap: true,
+                  ),
                   if (displaySegments.isNotEmpty) ...[
                     _buildInfoRow(
                       'Duration',
                       _formatDurationFromSegments(displaySegments),
                       theme,
+                      wrap: true,
                     ),
                   ],
                   if (provider.activeJobId != null)
                     _buildInfoRow(
                       'Job',
-                      provider.activeJobId!.length > 8
-                          ? '${provider.activeJobId!.substring(0, 8)}...'
-                          : provider.activeJobId!,
+                      provider.activeJobId!,
                       theme,
+                      wrap: true,
                     ),
 
                   const SizedBox(height: 24),
@@ -537,21 +547,39 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, ThemeData theme) {
+  Widget _buildInfoRow(
+    String label,
+    String value,
+    ThemeData theme, {
+    bool wrap = false,
+  }) {
+    final valueStyle = ScribeTheme.monoStyle(
+      context,
+      fontSize: 11,
+      color: theme.colorScheme.onSurface,
+    );
+
+    if (wrap) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: theme.textTheme.bodySmall),
+            const SizedBox(height: 2),
+            SelectableText(value, style: valueStyle),
+          ],
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
       child: Row(
         children: [
           Text(label, style: theme.textTheme.bodySmall),
           const Spacer(),
-          Text(
-            value,
-            style: ScribeTheme.monoStyle(
-              context,
-              fontSize: 11,
-              color: theme.colorScheme.onSurface,
-            ),
-          ),
+          Text(value, style: valueStyle),
         ],
       ),
     );

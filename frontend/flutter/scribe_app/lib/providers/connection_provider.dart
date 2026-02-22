@@ -16,14 +16,22 @@ class ConnectionProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   ScribeGrpcClient get client => _client;
 
-  Future<void> connect() async {
+  String _host = '127.0.0.1';
+  int _port = 50051;
+
+  String get host => _host;
+  int get port => _port;
+
+  Future<void> connect({String? host, int? port}) async {
+    if (host != null) _host = host;
+    if (port != null) _port = port;
     if (_state == BackendConnectionState.connecting) return;
     _state = BackendConnectionState.connecting;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      await _client.connect();
+      await _client.connect(host: _host, port: _port);
       final response = await _client.healthCheck();
       if (response.ok) {
         _state = BackendConnectionState.connected;

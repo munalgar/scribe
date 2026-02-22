@@ -73,13 +73,9 @@ bash scripts/gen_proto.sh  # On Windows: powershell scripts/gen_proto.ps1
 
 ```bash
 # Navigate to Flutter app
-cd frontend/flutter
-
-# Create Flutter project
-flutter create --platforms=windows,macos,linux scribe_app
+cd frontend/flutter/scribe_app
 
 # Get dependencies
-cd scribe_app
 flutter pub get
 ```
 
@@ -189,7 +185,7 @@ flutter build linux
 - Verify internet connection for initial download
 - Try smaller model first (tiny or base)
 
-## � Testing
+## Testing
 
 ### Backend Tests
 
@@ -209,7 +205,7 @@ cd frontend/flutter/scribe_app
 flutter test
 ```
 
-## �🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see CONTRIBUTING.md for guidelines.
 

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/connection_provider.dart';
 import '../providers/transcription_provider.dart';
 import '../providers/settings_provider.dart';
+import '../services/app_preferences.dart';
 import '../theme.dart';
 import 'transcription_screen.dart';
 import 'jobs_screen.dart';
@@ -42,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _conn = context.read<ConnectionProvider>();
     final transcription = context.read<TranscriptionProvider>();
     final settings = context.read<SettingsProvider>();
+    final prefs = context.read<AppPreferences>();
 
     _connListener = () {
       if (_conn!.state == BackendConnectionState.connected) {
@@ -57,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
     };
 
     _conn!.addListener(_connListener!);
-    _conn!.connect();
+    _conn!.connect(host: prefs.serverHost, port: prefs.serverPort);
   }
 
   @override
@@ -121,9 +123,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                               clipBehavior: Clip.antiAlias,
                               child: Image.asset(
-                                Theme.of(context).brightness == Brightness.light
-                                    ? 'assets/images/scribe-logo-black.png'
-                                    : 'assets/images/scribe-logo-white.png',
+                                'assets/images/scribe-logo.png',
                                 fit: BoxFit.cover,
                               ),
                             ),
