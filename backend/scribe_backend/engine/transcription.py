@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, Callable
 import time
 
 from faster_whisper import WhisperModel
+import requests
 
 from ..db.dao import Database
 from ..proto import scribe_pb2
@@ -27,6 +28,10 @@ EventCallback = Callable[[str, Dict[str, Any]], None]
 _MODEL_CACHE_BUDGET = int(os.environ.get(
     'SCRIBE_MODEL_CACHE_BYTES', 2 * 1024 * 1024 * 1024
 ))
+_TRANSLATE_API_URL = "https://translate.googleapis.com/translate_a/single"
+_SUPPORTED_TRANSLATION_LANGUAGES = {
+    "en", "es", "fr", "de", "it", "pt", "ja", "zh", "ko"
+}
 
 
 class _ModelCache:
@@ -111,7 +116,8 @@ class TranscriptionEngine:
         
     async def run_job(self, job_id: str, audio_path: str,
                      model_name: str = "base", language: str = None,
-                     translate: bool = False, initial_prompt: str = None,
+                     translate: bool = False, translate_to_language: str = None,
+                     initial_prompt: str = None,
                      enable_gpu: bool = True,
                      on_event: EventCallback = None) -> bool:
         """
@@ -123,6 +129,7 @@ class TranscriptionEngine:
             model_name: Whisper model to use
             language: Source language code (None for auto-detect)
             translate: Whether to translate to English
+            translate_to_language: Optional translation target language code
             initial_prompt: Optional prompt to guide transcription
             enable_gpu: Whether to use GPU if available
             on_event: Optional callback fired for each transcription event
@@ -130,9 +137,18 @@ class TranscriptionEngine:
         Returns:
             True if successful, False otherwise
         """
+        target_language = (
+            (translate_to_language or ("en" if translate else None)) or None
+        )
+        if target_language is not None:
+            target_language = target_language.lower()
+
         logger.info(f"Starting transcription job {job_id}")
         logger.info(f"Audio file: {audio_path}")
-        logger.info(f"Model: {model_name}, Language: {language}, Translate: {translate}")
+        logger.info(
+            f"Model: {model_name}, Language: {language}, "
+            f"Translate target: {target_language or 'off'}"
+        )
 
         def _emit(status: int, progress: float = 0.0, **kwargs):
             """Fire the event callback if one was provided."""
@@ -143,6 +159,13 @@ class TranscriptionEngine:
         self.active_jobs[job_id] = True
 
         try:
+            if target_language is not None and (
+                target_language not in _SUPPORTED_TRANSLATION_LANGUAGES
+            ):
+                raise ValueError(
+                    f"Unsupported translation language: {target_language}"
+                )
+
             # Validate audio file exists
             if not os.path.exists(audio_path):
                 error_msg = f"Audio file not found: {audio_path}"
@@ -192,7 +215,7 @@ class TranscriptionEngine:
                 return model.transcribe(
                     audio_path,
                     language=language,
-                    task="translate" if translate else "transcribe",
+                    task="translate" if target_language == "en" else "transcribe",
                     initial_prompt=initial_prompt,
                     vad_filter=True,
                     vad_parameters=dict(min_silence_duration_ms=500),
@@ -206,6 +229,7 @@ class TranscriptionEngine:
             segment_count = 0
             processed_duration = 0.0
             segment_batch = []
+            translation_cache: Dict[str, str] = {}
 
             def _next_segment(it):
                 """Get next segment from iterator, returns None at end."""
@@ -233,6 +257,19 @@ class TranscriptionEngine:
                     'end': segment.end,
                     'text': segment.text.strip(),
                 }
+                if target_language and target_language != "en" and segment_data['text']:
+                    source_text = segment_data['text']
+                    translated_text = translation_cache.get(source_text)
+                    if translated_text is None:
+                        translated_text = await loop.run_in_executor(
+                            self._executor,
+                            self._translate_text,
+                            source_text,
+                            target_language,
+                        )
+                        translation_cache[source_text] = translated_text
+                    segment_data['text'] = translated_text
+
                 segment_batch.append(segment_data)
                 segment_count += 1
                 processed_duration = segment.end
@@ -275,6 +312,34 @@ class TranscriptionEngine:
         finally:
             # Remove from active jobs
             self.active_jobs.pop(job_id, None)
+
+    def _translate_text(self, text: str, target_language: str) -> str:
+        """Translate text to a target language using Google Translate API."""
+        if not text.strip():
+            return text
+
+        response = requests.get(
+            _TRANSLATE_API_URL,
+            params={
+                "client": "gtx",
+                "sl": "auto",
+                "tl": target_language,
+                "dt": "t",
+                "q": text,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        payload = response.json()
+        translated_chunks = payload[0] if payload and len(payload) > 0 else []
+        translated_text = "".join(
+            chunk[0] for chunk in translated_chunks if chunk and chunk[0]
+        ).strip()
+
+        if not translated_text:
+            raise RuntimeError("Translation service returned an empty result")
+        return translated_text
     
     async def _get_or_load_model(self, model_name: str, device: str,
                                 compute_type: str) -> WhisperModel:

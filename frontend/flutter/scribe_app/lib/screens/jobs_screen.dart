@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
+import 'package:provider/provider.dart';
 
 import '../providers/connection_provider.dart';
 import '../providers/transcription_provider.dart';
@@ -10,8 +10,54 @@ import '../proto/scribe.pbgrpc.dart';
 import '../services/export_formatters.dart';
 import '../services/export_service.dart';
 
+String _formatCreatedAt(String raw) {
+  if (raw.isEmpty) return 'Unknown date';
+  try {
+    final dt = DateTime.parse(raw);
+    return DateFormat.yMMMd().add_Hm().format(dt.toLocal());
+  } catch (_) {
+    return raw;
+  }
+}
+
+String _jobBaseName(pb.JobSummary job) {
+  if (job.audioPath.isNotEmpty) {
+    final baseName = p.basenameWithoutExtension(job.audioPath);
+    if (baseName.isNotEmpty) return baseName;
+  }
+
+  if (job.jobId.isEmpty) return 'Untitled transcript';
+  return job.jobId;
+}
+
+Map<String, String> _buildUniqueJobNames(List<pb.JobSummary> jobs) {
+  final namesByJobId = <String, String>{};
+  final seenByBaseName = <String, int>{};
+  final usedNames = <String>{};
+
+  for (final job in jobs) {
+    final baseName = _jobBaseName(job);
+    var sequence = (seenByBaseName[baseName] ?? 0) + 1;
+    seenByBaseName[baseName] = sequence;
+
+    var candidate = sequence == 1 ? baseName : '$baseName ($sequence)';
+    while (usedNames.contains(candidate)) {
+      sequence += 1;
+      seenByBaseName[baseName] = sequence;
+      candidate = '$baseName ($sequence)';
+    }
+
+    namesByJobId[job.jobId] = candidate;
+    usedNames.add(candidate);
+  }
+
+  return namesByJobId;
+}
+
 class JobsScreen extends StatefulWidget {
-  const JobsScreen({super.key});
+  final VoidCallback? onJobOpened;
+
+  const JobsScreen({super.key, this.onJobOpened});
 
   @override
   State<JobsScreen> createState() => _JobsScreenState();
@@ -69,21 +115,25 @@ class JobsScreen extends StatefulWidget {
     );
 
     if (savedPath != null && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exported to $savedPath')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Exported to $savedPath')));
     }
   }
 
   static void confirmDelete(
-      BuildContext context, TranscriptionProvider provider, String jobId) {
+    BuildContext context,
+    TranscriptionProvider provider,
+    String jobId,
+  ) {
     final theme = Theme.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Transcription'),
         content: const Text(
-            'This will permanently remove this transcription and its data.'),
+          'This will permanently remove this transcription and its data.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -138,6 +188,17 @@ class _JobsScreenState extends State<JobsScreen> {
     });
   }
 
+  Future<void> _openJob(TranscriptionProvider provider, String jobId) async {
+    final success = await provider.loadSavedJob(jobId);
+    if (success && mounted) {
+      widget.onJobOpened?.call();
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No transcript data available')),
+      );
+    }
+  }
+
   void _confirmBatchDelete(TranscriptionProvider provider) {
     final count = _selected.length;
     final theme = Theme.of(context);
@@ -146,7 +207,8 @@ class _JobsScreenState extends State<JobsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Delete Selected'),
         content: Text(
-            'This will permanently remove $count transcription${count == 1 ? '' : 's'} and their data.'),
+          'This will permanently remove $count transcription${count == 1 ? '' : 's'} and their data.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -175,6 +237,7 @@ class _JobsScreenState extends State<JobsScreen> {
     final conn = context.watch<ConnectionProvider>();
     final isConnected = conn.state == BackendConnectionState.connected;
     final theme = Theme.of(context);
+    final displayNamesByJobId = _buildUniqueJobNames(provider.jobs);
 
     // Clean up stale selections
     if (_selectMode) {
@@ -185,104 +248,119 @@ class _JobsScreenState extends State<JobsScreen> {
       }
     }
 
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(32, 32, 32, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(provider, isConnected, theme),
-              const SizedBox(height: 8),
-              Text(
-                'Your transcription history',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 24),
-              if (provider.error != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.errorContainer,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.error_outline_rounded,
-                            color: theme.colorScheme.error, size: 20),
-                        const SizedBox(width: 10),
-                        Expanded(child: Text(provider.error!)),
-                      ],
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      children: [
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(32, 12, 32, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHeader(provider, isConnected, theme),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Your transcription history',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                ),
-              Expanded(
-                child: provider.jobs.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
+                  const SizedBox(height: 24),
+                  if (provider.error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
                           children: [
-                            Container(
-                              width: 64,
-                              height: 64,
-                              decoration: BoxDecoration(
-                                color: theme.colorScheme.surfaceContainerHigh,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Icon(
-                                Icons.history_rounded,
-                                size: 32,
-                                color: theme.colorScheme.onSurfaceVariant
-                                    .withValues(alpha: 0.5),
-                              ),
+                            Icon(
+                              Icons.error_outline_rounded,
+                              color: theme.colorScheme.error,
+                              size: 20,
                             ),
-                            const SizedBox(height: 20),
-                            Text(
-                              'No transcriptions yet',
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Your completed transcriptions will appear here',
-                              style: theme.textTheme.bodySmall,
-                            ),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(provider.error!)),
                           ],
                         ),
-                      )
-                    : ListView.separated(
-                        itemCount: provider.jobs.length,
-                        separatorBuilder: (_, __) =>
-                            const SizedBox(height: 8),
-                        itemBuilder: (context, index) {
-                          final job = provider.jobs[index];
-                          return _JobCard(
-                            key: ValueKey(job.jobId),
-                            job: job,
-                            provider: provider,
-                            isConnected: isConnected,
-                            selectMode: _selectMode,
-                            isSelected: _selected.contains(job.jobId),
-                            onToggleSelect: () => _toggleSelect(job.jobId),
-                          );
-                        },
                       ),
+                    ),
+                  if (provider.jobs.isEmpty)
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 64,
+                            height: 64,
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainerHigh,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Icon(
+                              Icons.history_rounded,
+                              size: 32,
+                              color: theme.colorScheme.onSurfaceVariant
+                                  .withValues(alpha: 0.5),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          Text(
+                            'No transcriptions yet',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Your completed transcriptions will appear here',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ...provider.jobs.indexed.map((entry) {
+                      final (index, job) = entry;
+                      final isLast = index == provider.jobs.length - 1;
+                      return Padding(
+                        padding: EdgeInsets.only(bottom: isLast ? 32 : 8),
+                        child: _JobCard(
+                          key: ValueKey(job.jobId),
+                          job: job,
+                          displayName:
+                              displayNamesByJobId[job.jobId] ??
+                              _jobBaseName(job),
+                          provider: provider,
+                          isConnected: isConnected,
+                          selectMode: _selectMode,
+                          isSelected: _selected.contains(job.jobId),
+                          onToggleSelect: () => _toggleSelect(job.jobId),
+                          onOpen: job.status == JobStatus.COMPLETED
+                              ? () => _openJob(provider, job.jobId)
+                              : null,
+                        ),
+                      );
+                    }),
+                ],
               ),
-            ],
+            ),
           ),
         ),
-      ),
+      ],
     );
   }
 
   Widget _buildHeader(
-      TranscriptionProvider provider, bool isConnected, ThemeData theme) {
+    TranscriptionProvider provider,
+    bool isConnected,
+    ThemeData theme,
+  ) {
     if (_selectMode) {
       return Row(
         children: [
@@ -309,10 +387,9 @@ class _JobsScreenState extends State<JobsScreen> {
           ),
           const SizedBox(width: 8),
           FilledButton.icon(
-            onPressed:
-                _selected.isNotEmpty && isConnected
-                    ? () => _confirmBatchDelete(provider)
-                    : null,
+            onPressed: _selected.isNotEmpty && isConnected
+                ? () => _confirmBatchDelete(provider)
+                : null,
             icon: const Icon(Icons.delete_outline_rounded, size: 18),
             label: const Text('Delete'),
             style: FilledButton.styleFrom(
@@ -329,16 +406,20 @@ class _JobsScreenState extends State<JobsScreen> {
         const Spacer(),
         if (provider.jobs.isNotEmpty)
           IconButton(
-            icon: Icon(Icons.checklist_rounded,
-                color: theme.colorScheme.onSurfaceVariant),
+            icon: Icon(
+              Icons.checklist_rounded,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
             tooltip: 'Select',
             onPressed: isConnected
                 ? () => setState(() => _selectMode = true)
                 : null,
           ),
         IconButton(
-          icon: Icon(Icons.refresh_rounded,
-              color: theme.colorScheme.onSurfaceVariant),
+          icon: Icon(
+            Icons.refresh_rounded,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
           tooltip: 'Refresh',
           onPressed: isConnected ? () => provider.loadJobs() : null,
         ),
@@ -349,20 +430,24 @@ class _JobsScreenState extends State<JobsScreen> {
 
 class _JobCard extends StatelessWidget {
   final pb.JobSummary job;
+  final String displayName;
   final TranscriptionProvider provider;
   final bool isConnected;
   final bool selectMode;
   final bool isSelected;
   final VoidCallback onToggleSelect;
+  final VoidCallback? onOpen;
 
   const _JobCard({
     super.key,
     required this.job,
+    required this.displayName,
     required this.provider,
     required this.isConnected,
     required this.selectMode,
     required this.isSelected,
     required this.onToggleSelect,
+    this.onOpen,
   });
 
   @override
@@ -370,14 +455,14 @@ class _JobCard extends StatelessWidget {
     final theme = Theme.of(context);
 
     return GestureDetector(
-      onTap: selectMode ? onToggleSelect : null,
+      onTap: selectMode ? onToggleSelect : onOpen,
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(15),
         decoration: BoxDecoration(
           color: isSelected
               ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
               : theme.cardTheme.color,
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: isSelected
                 ? theme.colorScheme.primary.withValues(alpha: 0.5)
@@ -387,10 +472,7 @@ class _JobCard extends StatelessWidget {
         child: Row(
           children: [
             if (selectMode) ...[
-              Checkbox(
-                value: isSelected,
-                onChanged: (_) => onToggleSelect(),
-              ),
+              Checkbox(value: isSelected, onChanged: (_) => onToggleSelect()),
               const SizedBox(width: 6),
             ],
             _statusIcon(theme, job.status),
@@ -400,18 +482,16 @@ class _JobCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    job.jobId.length > 8
-                        ? '${job.jobId.substring(0, 8)}...'
-                        : job.jobId,
-                    style: GoogleFonts.jetBrainsMono(
-                      fontSize: 13,
+                    displayName,
+                    style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w500,
                       color: theme.colorScheme.onSurface,
                     ),
+                    softWrap: true,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    job.createdAt.isNotEmpty ? job.createdAt : 'Unknown date',
+                    _formatCreatedAt(job.createdAt),
                     style: theme.textTheme.bodySmall,
                   ),
                 ],
@@ -420,25 +500,33 @@ class _JobCard extends StatelessWidget {
             if (!selectMode) ...[
               if (job.status == JobStatus.COMPLETED)
                 PopupMenuButton<ExportFormat>(
-                  icon: Icon(Icons.download_rounded,
-                      size: 20, color: theme.colorScheme.onSurfaceVariant),
+                  icon: Icon(
+                    Icons.download_rounded,
+                    size: 19,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                   tooltip: 'Export',
                   onSelected: (format) =>
                       JobsScreen.exportJob(context, provider, job, format),
                   itemBuilder: (context) => ExportFormat.values
-                      .map((f) => PopupMenuItem(
-                            value: f,
-                            child: Text('${f.label} (.${f.extension})'),
-                          ))
+                      .map(
+                        (f) => PopupMenuItem(
+                          value: f,
+                          child: Text('${f.label} (.${f.extension})'),
+                        ),
+                      )
                       .toList(),
                 ),
               IconButton(
-                icon: Icon(Icons.delete_outline_rounded,
-                    size: 20, color: theme.colorScheme.onSurfaceVariant),
+                icon: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 19,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
                 tooltip: 'Delete',
                 onPressed: isConnected
                     ? () =>
-                        JobsScreen.confirmDelete(context, provider, job.jobId)
+                          JobsScreen.confirmDelete(context, provider, job.jobId)
                     : null,
               ),
             ],
@@ -456,10 +544,8 @@ class _JobCard extends StatelessWidget {
     switch (status) {
       case JobStatus.COMPLETED:
         icon = Icons.check_rounded;
-        color = theme.brightness == Brightness.light
-            ? const Color(0xFF2D6A3F) : const Color(0xFF8BC99B);
-        bgColor = theme.brightness == Brightness.light
-            ? const Color(0xFFD4EDDA) : const Color(0xFF1E3A28);
+        color = theme.colorScheme.onTertiaryContainer;
+        bgColor = theme.colorScheme.tertiaryContainer;
       case JobStatus.FAILED:
         icon = Icons.close_rounded;
         color = theme.colorScheme.error;
@@ -470,16 +556,16 @@ class _JobCard extends StatelessWidget {
         bgColor = theme.colorScheme.secondaryContainer;
       case JobStatus.RUNNING:
         return Container(
-          width: 36,
-          height: 36,
+          width: 34,
+          height: 34,
           decoration: BoxDecoration(
             color: theme.colorScheme.primaryContainer,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(9),
           ),
           child: Center(
             child: SizedBox(
-              width: 18,
-              height: 18,
+              width: 16,
+              height: 16,
               child: CircularProgressIndicator(
                 strokeWidth: 2,
                 color: theme.colorScheme.primary,
@@ -498,13 +584,13 @@ class _JobCard extends StatelessWidget {
     }
 
     return Container(
-      width: 36,
-      height: 36,
+      width: 34,
+      height: 34,
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(9),
       ),
-      child: Icon(icon, size: 18, color: color),
+      child: Icon(icon, size: 17, color: color),
     );
   }
 }

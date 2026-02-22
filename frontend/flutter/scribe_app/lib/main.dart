@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 
 import 'providers/connection_provider.dart';
@@ -8,6 +9,8 @@ import 'screens/home_screen.dart';
 import 'theme.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  MediaKit.ensureInitialized();
   runApp(const ScribeApp());
 }
 
@@ -25,9 +28,7 @@ class ScribeApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Scribe',
         debugShowCheckedModeBanner: false,
-        theme: ScribeTheme.light(),
-        darkTheme: ScribeTheme.dark(),
-        themeMode: ThemeMode.system,
+        theme: ScribeTheme.dark(),
         home: const HomeScreen(),
       ),
     );

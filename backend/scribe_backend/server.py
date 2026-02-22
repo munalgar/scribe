@@ -50,25 +50,54 @@ async def serve():
     # Start server
     await server.start()
     
-    # Handle shutdown gracefully using loop-aware signal handlers
+    # Handle shutdown gracefully using an explicit shutdown event.
     loop = asyncio.get_running_loop()
+    shutdown_event = asyncio.Event()
+    registered_signals = []
+
+    def _request_shutdown():
+        if not shutdown_event.is_set():
+            logger.info("Shutdown requested")
+            shutdown_event.set()
+
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(
-            sig,
-            lambda: asyncio.create_task(server.stop(5))
-        )
+        try:
+            loop.add_signal_handler(sig, _request_shutdown)
+            registered_signals.append(sig)
+        except (NotImplementedError, RuntimeError):
+            # add_signal_handler is not available on some platforms/event loops.
+            pass
     
+    termination_task = asyncio.create_task(server.wait_for_termination())
+    shutdown_task = asyncio.create_task(shutdown_event.wait())
+
     try:
-        await server.wait_for_termination()
-    except KeyboardInterrupt:
+        done, pending = await asyncio.wait(
+            {termination_task, shutdown_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+    except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Server interrupted")
     finally:
+        for sig in registered_signals:
+            loop.remove_signal_handler(sig)
+        await server.stop(5)
+        service.db.close()
         logger.info("Server stopped")
 
 
 def main():
     """Main entry point"""
-    asyncio.run(serve())
+    try:
+        asyncio.run(serve())
+    except KeyboardInterrupt:
+        # asyncio.run() may still raise KeyboardInterrupt after task cancellation.
+        # Treat Ctrl+C as normal shutdown to avoid noisy traceback output.
+        pass
 
 
 if __name__ == "__main__":

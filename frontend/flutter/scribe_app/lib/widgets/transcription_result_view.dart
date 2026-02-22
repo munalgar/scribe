@@ -1,6 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:path/path.dart' as p;
 
@@ -9,15 +11,18 @@ import '../providers/transcription_provider.dart';
 import '../proto/scribe.pbgrpc.dart';
 import '../services/export_formatters.dart';
 import '../services/export_service.dart';
+import '../theme.dart';
+import 'audio_player_bar.dart';
 import 'batch_queue_panel.dart';
 import 'status_badge.dart';
+import 'transcript_panel.dart';
 
-/// The active transcription view showing progress, segments, and controls.
-class TranscriptionResultView extends StatelessWidget {
+class TranscriptionResultView extends StatefulWidget {
   final ScrollController scrollController;
   final int viewingBatchIndex;
   final ValueChanged<int> onViewingIndexChanged;
   final bool isConnected;
+  final Player audioPlayer;
 
   const TranscriptionResultView({
     super.key,
@@ -25,7 +30,53 @@ class TranscriptionResultView extends StatelessWidget {
     required this.viewingBatchIndex,
     required this.onViewingIndexChanged,
     required this.isConnected,
+    required this.audioPlayer,
   });
+
+  @override
+  State<TranscriptionResultView> createState() =>
+      _TranscriptionResultViewState();
+}
+
+class _TranscriptionResultViewState extends State<TranscriptionResultView> {
+  final GlobalKey<AudioPlayerBarState> _playerBarKey = GlobalKey();
+  final GlobalKey<TranscriptPanelState> _transcriptKey = GlobalKey();
+
+  Duration _playbackPosition = Duration.zero;
+  bool _isPlaying = false;
+  bool _isUtilitySidebarCollapsed = false;
+  final List<StreamSubscription> _subs = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _subs.add(
+      widget.audioPlayer.stream.position.listen((p) {
+        if (mounted) setState(() => _playbackPosition = p);
+      }),
+    );
+    _subs.add(
+      widget.audioPlayer.stream.playing.listen((p) {
+        if (mounted) setState(() => _isPlaying = p);
+      }),
+    );
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    super.dispose();
+  }
+
+  void _handleSeek(Duration position) {
+    _playerBarKey.currentState?.seekTo(position);
+  }
+
+  void _handleSpaceKey() {
+    _playerBarKey.currentState?.togglePlayPause();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,266 +86,542 @@ class TranscriptionResultView extends StatelessWidget {
     final isDone = provider.isBatchMode
         ? provider.isBatchComplete
         : (provider.activeJobStatus == JobStatus.COMPLETED ||
-            provider.activeJobStatus == JobStatus.FAILED ||
-            provider.activeJobStatus == JobStatus.CANCELED);
+              provider.activeJobStatus == JobStatus.FAILED ||
+              provider.activeJobStatus == JobStatus.CANCELED);
 
-    // Determine which segments to display
     final List<BatchItem> queue = provider.batchQueue;
-    final viewIndex =
-        viewingBatchIndex.clamp(0, queue.isEmpty ? 0 : queue.length - 1);
+    final viewIndex = widget.viewingBatchIndex.clamp(
+      0,
+      queue.isEmpty ? 0 : queue.length - 1,
+    );
     final viewingItem = queue.isNotEmpty ? queue[viewIndex] : null;
     final displaySegments = viewingItem?.segments ?? provider.segments;
     final selectedPath = provider.selectedFilePath;
-    final displayFileName = viewingItem?.fileName ??
+    final displayFileName =
+        viewingItem?.fileName ??
         (selectedPath != null ? p.basename(selectedPath) : 'Audio file');
 
-    return Column(
-      children: [
-        // Top bar
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-          decoration: BoxDecoration(
-            border: Border(
-              bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+    final audioPath = viewingItem?.filePath ?? provider.selectedFilePath;
+    final audioDurationHint = _durationHintFromSegments(displaySegments);
+    final hasAudio = audioPath != null && isDone;
+
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.space): _handleSpaceKey,
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): () =>
+            _playerBarKey.currentState?.seekBackwardByStep(),
+        const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): () =>
+            _playerBarKey.currentState?.seekForwardByStep(),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Column(
+          children: [
+            _buildTopBar(
+              context,
+              theme,
+              provider,
+              isDone,
+              displayFileName,
+              displaySegments,
+              viewingItem,
             ),
-          ),
-          child: Row(
-            children: [
-              Flexible(
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerLow,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.audio_file_rounded,
-                          size: 16, color: theme.colorScheme.onSurfaceVariant),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          displayFileName,
-                          style: theme.textTheme.titleSmall,
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              StatusBadge(status: provider.activeJobStatus),
-              if (provider.isBatchMode) ...[
-                const SizedBox(width: 12),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.tertiaryContainer,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    'File ${provider.completedBatchFiles + (provider.isTranscribing ? 1 : 0)} of ${provider.totalBatchFiles}',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: theme.colorScheme.onTertiaryContainer,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(width: 12),
-              if (isDone) ...[
-                if (displaySegments.isNotEmpty) ...[
-                  PopupMenuButton<ExportFormat>(
-                    icon: Icon(Icons.download_rounded,
-                        color: theme.colorScheme.onSurfaceVariant),
-                    tooltip: 'Export transcript',
-                    onSelected: (format) =>
-                        _exportTranscript(context, format, provider, viewingItem),
-                    itemBuilder: (context) => ExportFormat.values
-                        .map((f) => PopupMenuItem(
-                              value: f,
-                              child: Text('${f.label} (.${f.extension})'),
-                            ))
-                        .toList(),
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.copy_rounded,
-                        color: theme.colorScheme.onSurfaceVariant),
-                    tooltip: 'Copy transcript',
-                    onPressed: () {
-                      final text = viewingItem != null
-                          ? provider.getTranscriptForItem(viewIndex)
-                          : provider.getFullTranscript();
-                      Clipboard.setData(ClipboardData(text: text));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Transcript copied')),
-                      );
-                    },
-                  ),
-                ],
-                const SizedBox(width: 4),
-                FilledButton.icon(
-                  onPressed: () => provider.reset(),
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('New'),
-                ),
-              ],
-              if (provider.isTranscribing)
-                OutlinedButton.icon(
-                  onPressed: () => provider.cancelTranscription(),
-                  icon: const Icon(Icons.stop_rounded, size: 18),
-                  label: Text(provider.isBatchMode ? 'Cancel All' : 'Cancel'),
-                ),
-            ],
-          ),
-        ),
 
-        // Per-file progress bar (only while transcribing)
-        if (!isDone && provider.isTranscribing)
-          Column(
-            children: [
-              LinearProgressIndicator(
-                value: provider.progress > 0 ? provider.progress : null,
-                minHeight: 3,
-              ),
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 28, vertical: 8),
-                child: Row(
-                  children: [
-                    Text(
-                      '${(provider.progress * 100).toInt()}%',
-                      style: theme.textTheme.labelSmall,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            if (!isDone && provider.isTranscribing)
+              _buildProgressBar(theme, provider),
 
-        // Batch queue panel
-        if (provider.isBatchMode)
-          BatchQueuePanel(
-            viewingBatchIndex: viewingBatchIndex,
-            onViewingIndexChanged: onViewingIndexChanged,
-          ),
-
-        // Error
-        if (provider.error != null &&
-            provider.activeJobStatus == JobStatus.FAILED)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(28, 8, 28, 0),
-            child: Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(12),
+            if (provider.isBatchMode)
+              BatchQueuePanel(
+                viewingBatchIndex: widget.viewingBatchIndex,
+                onViewingIndexChanged: widget.onViewingIndexChanged,
               ),
+
+            if (provider.error != null &&
+                provider.activeJobStatus == JobStatus.FAILED)
+              _buildErrorBanner(theme, provider),
+
+            Expanded(
               child: Row(
                 children: [
-                  Icon(Icons.error_outline_rounded,
-                      color: theme.colorScheme.error, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(child: Text(provider.error!)),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: TranscriptPanel(
+                            key: _transcriptKey,
+                            segments: displaySegments,
+                            playbackPosition: _playbackPosition,
+                            isPlaying: _isPlaying,
+                            onSeek: _handleSeek,
+                            isTranscribing:
+                                provider.isTranscribing &&
+                                viewingItem?.status == BatchItemStatus.running,
+                            scrollController: widget.scrollController,
+                          ),
+                        ),
+                        AudioPlayerBar(
+                          key: _playerBarKey,
+                          player: widget.audioPlayer,
+                          filePath: audioPath,
+                          durationHint: audioDurationHint,
+                          enabled: hasAudio,
+                        ),
+                      ],
+                    ),
+                  ),
+                  _buildSidebar(
+                    context,
+                    theme,
+                    provider,
+                    isDone,
+                    displaySegments,
+                    viewingItem,
+                    viewIndex,
+                  ),
                 ],
               ),
             ),
-          ),
+          ],
+        ),
+      ),
+    );
+  }
 
-        // Segments
-        Expanded(
-          child: displaySegments.isEmpty
-              ? Center(
-                  child: provider.isTranscribing &&
-                          viewingItem?.status == BatchItemStatus.running
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: 40,
-                              height: 40,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 3,
-                                color: theme.colorScheme.primary,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            Text(
-                              'Processing audio...',
-                              style: theme.textTheme.bodyLarge?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        )
-                      : Text(
-                          'No segments',
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                )
-              : Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 720),
-                    child: ListView.builder(
-                      controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(28, 16, 28, 28),
-                      itemCount: displaySegments.length,
-                      itemBuilder: (context, index) {
-                        final seg = displaySegments[index];
-                        return Padding(
-                          key: ValueKey(seg.index),
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              SizedBox(
-                                width: 90,
-                                child: Padding(
-                                  padding: const EdgeInsets.only(top: 2),
-                                  child: Text(
-                                    '${_formatTime(seg.start)} - ${_formatTime(seg.end)}',
-                                    style: GoogleFonts.jetBrainsMono(
-                                      fontSize: 11,
-                                      color: theme
-                                          .colorScheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Text(
-                                  seg.text,
-                                  style: theme.textTheme.bodyLarge,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
+  Widget _buildTopBar(
+    BuildContext context,
+    ThemeData theme,
+    TranscriptionProvider provider,
+    bool isDone,
+    String displayFileName,
+    List<dynamic> displaySegments,
+    BatchItem? viewingItem,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.audio_file_rounded,
+                  size: 15,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 240),
+                  child: Text(
+                    displayFileName,
+                    style: theme.textTheme.titleSmall,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          StatusBadge(status: provider.activeJobStatus),
+          if (provider.isBatchMode) ...[
+            const SizedBox(width: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${provider.completedBatchFiles + (provider.isTranscribing ? 1 : 0)} / ${provider.totalBatchFiles}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.onTertiaryContainer,
+                ),
+              ),
+            ),
+          ],
+          const Spacer(),
+          if (isDone)
+            FilledButton.icon(
+              onPressed: () => provider.reset(),
+              icon: const Icon(Icons.add_rounded, size: 16),
+              label: const Text('New'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+              ),
+            ),
+          if (provider.isTranscribing)
+            OutlinedButton.icon(
+              onPressed: () => provider.cancelTranscription(),
+              icon: const Icon(Icons.stop_rounded, size: 16),
+              label: Text(provider.isBatchMode ? 'Cancel All' : 'Cancel'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProgressBar(ThemeData theme, TranscriptionProvider provider) {
+    return Column(
+      children: [
+        LinearProgressIndicator(
+          value: provider.progress > 0 ? provider.progress : null,
+          minHeight: 3,
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 6),
+          child: Row(
+            children: [
+              Text(
+                '${(provider.progress * 100).toInt()}%',
+                style: theme.textTheme.labelSmall,
+              ),
+            ],
+          ),
         ),
       ],
     );
   }
 
-  Future<void> _exportTranscript(BuildContext context, ExportFormat format,
-      TranscriptionProvider provider, BatchItem? viewingItem) async {
-    final segments = viewingItem?.segments ?? provider.segments;
+  Widget _buildErrorBanner(ThemeData theme, TranscriptionProvider provider) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 6, 24, 0),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.error_outline_rounded,
+              color: theme.colorScheme.error,
+              size: 18,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                provider.error!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSidebar(
+    BuildContext context,
+    ThemeData theme,
+    TranscriptionProvider provider,
+    bool isDone,
+    List<dynamic> displaySegments,
+    BatchItem? viewingItem,
+    int viewIndex,
+  ) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+      width: _isUtilitySidebarCollapsed ? 58 : 260,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLowest,
+        border: Border(
+          left: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+            child: Row(
+              mainAxisAlignment: _isUtilitySidebarCollapsed
+                  ? MainAxisAlignment.center
+                  : MainAxisAlignment.spaceBetween,
+              children: [
+                if (!_isUtilitySidebarCollapsed)
+                  Text(
+                    'Utilities',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                IconButton(
+                  tooltip: _isUtilitySidebarCollapsed
+                      ? 'Expand utility sidebar'
+                      : 'Collapse utility sidebar',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () {
+                    setState(() {
+                      _isUtilitySidebarCollapsed = !_isUtilitySidebarCollapsed;
+                    });
+                  },
+                  icon: const Icon(Icons.tune_rounded, size: 20),
+                ),
+              ],
+            ),
+          ),
+          Divider(
+            color: theme.colorScheme.outlineVariant,
+            height: 1,
+          ),
+          if (_isUtilitySidebarCollapsed)
+            Expanded(
+              child: Center(
+                child: Icon(
+                  Icons.tune_rounded,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant.withValues(
+                    alpha: 0.65,
+                  ),
+                ),
+              ),
+            )
+          else
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+                    child: Text(
+                      'Export',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Column(
+                      children: ExportFormat.values.map((format) {
+                        return _SidebarExportTile(
+                          format: format,
+                          enabled: isDone && displaySegments.isNotEmpty,
+                          onTap: () => _exportTranscript(
+                            context,
+                            format,
+                            provider,
+                            viewingItem,
+                          ),
+                          theme: theme,
+                        );
+                      }).toList(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _SidebarActionButton(
+                      icon: Icons.copy_rounded,
+                      label: 'Copy to clipboard',
+                      enabled: isDone && displaySegments.isNotEmpty,
+                      theme: theme,
+                      onTap: () {
+                        final text = _transcriptKey.currentState != null
+                            ? _transcriptKey.currentState!
+                                  .getFullEditedTranscript()
+                            : (viewingItem != null
+                                  ? provider.getTranscriptForItem(viewIndex)
+                                  : provider.getFullTranscript());
+                        Clipboard.setData(ClipboardData(text: text));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Copied to clipboard')),
+                        );
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+                  Divider(
+                    color: theme.colorScheme.outlineVariant,
+                    height: 1,
+                    indent: 20,
+                    endIndent: 20,
+                  ),
+                  const SizedBox(height: 16),
+
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                    child: Text(
+                      'Info',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  _buildInfoRow('Segments', '${displaySegments.length}', theme),
+                  if (displaySegments.isNotEmpty) ...[
+                    _buildInfoRow(
+                      'Duration',
+                      _formatDurationFromSegments(displaySegments),
+                      theme,
+                    ),
+                  ],
+                  if (provider.activeJobId != null)
+                    _buildInfoRow(
+                      'Job',
+                      provider.activeJobId!.length > 8
+                          ? '${provider.activeJobId!.substring(0, 8)}...'
+                          : provider.activeJobId!,
+                      theme,
+                    ),
+
+                  const SizedBox(height: 24),
+                  Divider(
+                    color: theme.colorScheme.outlineVariant,
+                    height: 1,
+                    indent: 20,
+                    endIndent: 20,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.keyboard_rounded,
+                              size: 14,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text('Shortcuts', style: theme.textTheme.labelSmall),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _buildShortcutHint('Space', 'Play / Pause', theme),
+                        _buildShortcutHint(
+                          'Alt + ← →',
+                          'Skip by selected step',
+                          theme,
+                        ),
+                        _buildShortcutHint('Ctrl + F', 'Search', theme),
+                        _buildShortcutHint('Double-click', 'Edit text', theme),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
+      child: Row(
+        children: [
+          Text(label, style: theme.textTheme.bodySmall),
+          const Spacer(),
+          Text(
+            value,
+            style: ScribeTheme.monoStyle(
+              context,
+              fontSize: 11,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShortcutHint(String keys, String action, ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              keys,
+              style: ScribeTheme.monoStyle(context, fontSize: 10),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            action,
+            style: theme.textTheme.bodySmall?.copyWith(fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Duration? _durationHintFromSegments(List<dynamic> segments) {
+    if (segments.isEmpty) return null;
+    double maxEnd = 0;
+    for (final seg in segments) {
+      final end = seg.end;
+      if (end is num && end > maxEnd) {
+        maxEnd = end.toDouble();
+      }
+    }
+    if (maxEnd <= 0) return null;
+    return Duration(milliseconds: (maxEnd * 1000).round());
+  }
+
+  String _formatDurationFromSegments(List<dynamic> segments) {
+    final duration = _durationHintFromSegments(segments);
+    if (duration == null) return '--:--';
+    final totalSeconds = duration.inMilliseconds / 1000;
+    final h = (totalSeconds ~/ 3600);
+    final m = ((totalSeconds % 3600) ~/ 60).toString().padLeft(2, '0');
+    final s = ((totalSeconds % 60).truncate()).toString().padLeft(2, '0');
+    if (h > 0) return '$h:$m:$s';
+    return '$m:$s';
+  }
+
+  Future<void> _exportTranscript(
+    BuildContext context,
+    ExportFormat format,
+    TranscriptionProvider provider,
+    BatchItem? viewingItem,
+  ) async {
+    final panelState = _transcriptKey.currentState;
+    final segments = panelState != null
+        ? panelState.getSegmentsWithEdits()
+        : (viewingItem?.segments ?? provider.segments);
     if (segments.isEmpty) return;
 
     final exportPath = provider.selectedFilePath;
-    final audioName = viewingItem?.fileName ??
+    final audioName =
+        viewingItem?.fileName ??
         (exportPath != null ? p.basename(exportPath) : 'transcript');
     final baseName = audioName.contains('.')
         ? audioName.substring(0, audioName.lastIndexOf('.'))
@@ -314,15 +641,121 @@ class TranscriptionResultView extends StatelessWidget {
     );
 
     if (savedPath != null && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exported to $savedPath')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Exported to $savedPath')));
     }
   }
+}
 
-  String _formatTime(double seconds) {
-    final mins = seconds ~/ 60;
-    final secs = (seconds % 60).toInt();
-    return '${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+class _SidebarExportTile extends StatelessWidget {
+  final ExportFormat format;
+  final bool enabled;
+  final VoidCallback onTap;
+  final ThemeData theme;
+
+  const _SidebarExportTile({
+    required this.format,
+    required this.enabled,
+    required this.onTap,
+    required this.theme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+          child: Row(
+            children: [
+              Icon(
+                Icons.description_outlined,
+                size: 15,
+                color: enabled
+                    ? theme.colorScheme.onSurfaceVariant
+                    : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  format.label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: enabled
+                        ? theme.colorScheme.onSurface
+                        : theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                  ),
+                ),
+              ),
+              Text(
+                '.${format.extension}',
+                style: ScribeTheme.monoStyle(
+                  context,
+                  fontSize: 10,
+                  color: enabled
+                      ? theme.colorScheme.onSurfaceVariant
+                      : theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.3,
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SidebarActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool enabled;
+  final ThemeData theme;
+  final VoidCallback onTap;
+
+  const _SidebarActionButton({
+    required this.icon,
+    required this.label,
+    required this.enabled,
+    required this.theme,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+          child: Row(
+            children: [
+              Icon(
+                icon,
+                size: 15,
+                color: enabled
+                    ? theme.colorScheme.onSurfaceVariant
+                    : theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: enabled
+                      ? theme.colorScheme.onSurface
+                      : theme.colorScheme.onSurface.withValues(alpha: 0.3),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -39,6 +39,7 @@ message TranscriptionOptions {
   string initial_prompt = 5;
   float vad_threshold = 6;
   string compute_type = 7;
+  string translate_to_language = 8;
 }
 
 // Transcription segment
@@ -95,6 +96,7 @@ message JobSummary {
   string error = 3;
   string created_at = 4;
   string updated_at = 5;
+  string audio_path = 6;
 }
 
 message ListJobsResponse {

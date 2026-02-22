@@ -153,6 +153,11 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         model_name = options.model if options and options.model else "base"
         language = options.language if options and options.language else None
         translate = options.translate_to_english if options else False
+        translate_to_language = (
+            options.translate_to_language.lower()
+            if options and options.translate_to_language
+            else ("en" if translate else None)
+        )
         initial_prompt = options.initial_prompt if options and options.initial_prompt else None
         enable_gpu = options.enable_gpu if options else True
         
@@ -162,7 +167,7 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
             audio_path=audio_path,
             model=model_name,
             language=language or "auto",
-            translate=translate
+            translate=bool(translate_to_language)
         )
         
         if not success:
@@ -202,6 +207,7 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 model_name=model_name,
                 language=language,
                 translate=translate,
+                translate_to_language=translate_to_language,
                 initial_prompt=initial_prompt,
                 enable_gpu=enable_gpu,
                 on_event=_on_engine_event,
@@ -306,7 +312,8 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 job_id=job['job_id'],
                 status=job['status'],
                 created_at=job['created_at'],
-                updated_at=job['updated_at']
+                updated_at=job['updated_at'],
+                audio_path=job.get('audio_path', ''),
             )
             if job.get('error'):
                 summary.error = job['error']

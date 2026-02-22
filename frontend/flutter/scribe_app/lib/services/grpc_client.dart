@@ -12,11 +12,9 @@ class ScribeGrpcClient {
   static const _defaultTimeout = Duration(seconds: 10);
   static const _downloadTimeout = Duration(minutes: 60);
 
-  CallOptions get _defaultOptions =>
-      CallOptions(timeout: _defaultTimeout);
+  CallOptions get _defaultOptions => CallOptions(timeout: _defaultTimeout);
 
-  CallOptions get _downloadOptions =>
-      CallOptions(timeout: _downloadTimeout);
+  CallOptions get _downloadOptions => CallOptions(timeout: _downloadTimeout);
 
   Future<void> connect({String host = '127.0.0.1', int port = 50051}) async {
     await disconnect();
@@ -54,23 +52,26 @@ class ScribeGrpcClient {
     String model = 'base',
     bool enableGpu = true,
     String? language,
-    bool translateToEnglish = false,
+    String? translateToLanguage,
   }) {
     final request = pb.StartTranscriptionRequest()
       ..audio = (pb.AudioSource()..filePath = filePath)
       ..options = (pb.TranscriptionOptions()
         ..model = model
-        ..enableGpu = enableGpu
-        ..translateToEnglish = translateToEnglish);
+        ..enableGpu = enableGpu);
     if (language != null && language.isNotEmpty) {
       request.options.language = language;
+    }
+    if (translateToLanguage != null && translateToLanguage.isNotEmpty) {
+      request.options.translateToLanguage = translateToLanguage;
+      // Keep the legacy flag set for older backends and native Whisper EN translation.
+      request.options.translateToEnglish = translateToLanguage == 'en';
     }
     return stub.startTranscription(request, options: _defaultOptions);
   }
 
   ResponseStream<pb.TranscriptionEvent> streamTranscription(String jobId) =>
-      stub.streamTranscription(
-          pb.StreamTranscriptionRequest()..jobId = jobId);
+      stub.streamTranscription(pb.StreamTranscriptionRequest()..jobId = jobId);
 
   Future<pb.GetJobResponse> getJob(String jobId) =>
       stub.getJob(pb.GetJobRequest()..jobId = jobId, options: _defaultOptions);
@@ -78,37 +79,48 @@ class ScribeGrpcClient {
   Future<pb.ListJobsResponse> listJobs() =>
       stub.listJobs(pb.ListJobsRequest(), options: _defaultOptions);
 
-  Future<pb.CancelJobResponse> cancelJob(String jobId) =>
-      stub.cancelJob(pb.CancelJobRequest()..jobId = jobId,
-          options: _defaultOptions);
+  Future<pb.CancelJobResponse> cancelJob(String jobId) => stub.cancelJob(
+    pb.CancelJobRequest()..jobId = jobId,
+    options: _defaultOptions,
+  );
 
-  Future<pb.DeleteJobResponse> deleteJob(String jobId) =>
-      stub.deleteJob(pb.DeleteJobRequest()..jobId = jobId,
-          options: _defaultOptions);
+  Future<pb.DeleteJobResponse> deleteJob(String jobId) => stub.deleteJob(
+    pb.DeleteJobRequest()..jobId = jobId,
+    options: _defaultOptions,
+  );
 
   Future<pb.GetTranscriptResponse> getTranscript(String jobId) =>
-      stub.getTranscript(pb.GetTranscriptRequest()..jobId = jobId,
-          options: _defaultOptions);
+      stub.getTranscript(
+        pb.GetTranscriptRequest()..jobId = jobId,
+        options: _defaultOptions,
+      );
 
   Future<pb.GetSettingsResponse> getSettings() =>
       stub.getSettings(pb.GetSettingsRequest(), options: _defaultOptions);
 
   Future<pb.UpdateSettingsResponse> updateSettings(pb.Settings settings) =>
-      stub.updateSettings(pb.UpdateSettingsRequest()..settings = settings,
-          options: _defaultOptions);
+      stub.updateSettings(
+        pb.UpdateSettingsRequest()..settings = settings,
+        options: _defaultOptions,
+      );
 
   Future<pb.ListModelsResponse> listModels() =>
       stub.listModels(pb.ListModelsRequest(), options: _defaultOptions);
 
   ResponseStream<pb.DownloadModelProgress> downloadModel(String name) =>
-      stub.downloadModel(pb.DownloadModelRequest()..name = name,
-          options: _downloadOptions);
+      stub.downloadModel(
+        pb.DownloadModelRequest()..name = name,
+        options: _downloadOptions,
+      );
 
   Future<pb.CancelDownloadResponse> cancelDownload(String name) =>
-      stub.cancelDownload(pb.CancelDownloadRequest()..name = name,
-          options: _defaultOptions);
+      stub.cancelDownload(
+        pb.CancelDownloadRequest()..name = name,
+        options: _defaultOptions,
+      );
 
-  Future<pb.DeleteModelResponse> deleteModel(String name) =>
-      stub.deleteModel(pb.DeleteModelRequest()..name = name,
-          options: _defaultOptions);
+  Future<pb.DeleteModelResponse> deleteModel(String name) => stub.deleteModel(
+    pb.DeleteModelRequest()..name = name,
+    options: _defaultOptions,
+  );
 }

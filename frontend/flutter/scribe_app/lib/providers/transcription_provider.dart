@@ -27,7 +27,7 @@ class TranscriptionProvider extends ChangeNotifier {
   String _batchModel = 'base';
   bool _batchEnableGpu = true;
   String? _batchLanguage;
-  bool _batchTranslateToEnglish = false;
+  String? _batchTranslateToLanguage;
 
   // Getters - existing
   List<pb.JobSummary> get jobs => _jobs;
@@ -52,8 +52,8 @@ class TranscriptionProvider extends ChangeNotifier {
   // Backward-compatible getter
   String? get selectedFilePath =>
       _currentBatchIndex >= 0 && _currentBatchIndex < _batchQueue.length
-          ? _batchQueue[_currentBatchIndex].filePath
-          : (_selectedFilePaths.isNotEmpty ? _selectedFilePaths.first : null);
+      ? _batchQueue[_currentBatchIndex].filePath
+      : (_selectedFilePaths.isNotEmpty ? _selectedFilePaths.first : null);
 
   void updateClient(ScribeGrpcClient? client) {
     _client = client;
@@ -94,14 +94,14 @@ class TranscriptionProvider extends ChangeNotifier {
     String model = 'base',
     bool enableGpu = true,
     String? language,
-    bool translateToEnglish = false,
+    String? translateToLanguage,
   }) async {
     _selectedFilePaths = [filePath];
     await startBatchTranscription(
       model: model,
       enableGpu: enableGpu,
       language: language,
-      translateToEnglish: translateToEnglish,
+      translateToLanguage: translateToLanguage,
     );
   }
 
@@ -109,7 +109,7 @@ class TranscriptionProvider extends ChangeNotifier {
     String model = 'base',
     bool enableGpu = true,
     String? language,
-    bool translateToEnglish = false,
+    String? translateToLanguage,
   }) async {
     if (_client == null || _selectedFilePaths.isEmpty) return;
 
@@ -117,11 +117,12 @@ class TranscriptionProvider extends ChangeNotifier {
     _batchModel = model;
     _batchEnableGpu = enableGpu;
     _batchLanguage = language;
-    _batchTranslateToEnglish = translateToEnglish;
+    _batchTranslateToLanguage = translateToLanguage;
 
     // Build queue
-    _batchQueue =
-        _selectedFilePaths.map((path) => BatchItem(filePath: path)).toList();
+    _batchQueue = _selectedFilePaths
+        .map((path) => BatchItem(filePath: path))
+        .toList();
     _currentBatchIndex = -1;
     _error = null;
     _isTranscribing = true;
@@ -165,7 +166,7 @@ class TranscriptionProvider extends ChangeNotifier {
         model: _batchModel,
         enableGpu: _batchEnableGpu,
         language: _batchLanguage,
-        translateToEnglish: _batchTranslateToEnglish,
+        translateToLanguage: _batchTranslateToLanguage,
       );
 
       item.jobId = response.jobId;
@@ -226,8 +227,9 @@ class TranscriptionProvider extends ChangeNotifier {
       },
       onError: (e) {
         item.status = BatchItemStatus.failed;
-        item.error =
-            e is GrpcError ? (e.message ?? 'Stream error') : e.toString();
+        item.error = e is GrpcError
+            ? (e.message ?? 'Stream error')
+            : e.toString();
         _error = item.error;
         notifyListeners();
         if (!advancingQueue) {
@@ -355,7 +357,8 @@ class TranscriptionProvider extends ChangeNotifier {
       }
     }
     if (deleted < jobIds.length) {
-      _error = 'Failed to delete ${jobIds.length - deleted} of ${jobIds.length} jobs';
+      _error =
+          'Failed to delete ${jobIds.length - deleted} of ${jobIds.length} jobs';
     }
     notifyListeners();
     return deleted;
@@ -384,6 +387,44 @@ class TranscriptionProvider extends ChangeNotifier {
       notifyListeners();
       return null;
     }
+  }
+
+  // --- Load saved job ---
+
+  Future<bool> loadSavedJob(String jobId) async {
+    if (_client == null) return false;
+
+    final response = await fetchFullTranscript(jobId);
+    if (response == null || response.segments.isEmpty) return false;
+
+    _streamSubscription?.cancel();
+    _streamSubscription = null;
+    _isTranscribing = false;
+    _error = null;
+    _progress = 1.0;
+    _currentBatchIndex = 0;
+
+    _activeJobId = jobId;
+    _activeJobStatus = JobStatus.COMPLETED;
+    _segments = response.segments.toList();
+
+    final audioPath = response.audioPath.isNotEmpty
+        ? response.audioPath
+        : 'unknown';
+    _selectedFilePaths = [audioPath];
+
+    _batchQueue = [
+      BatchItem(
+        filePath: audioPath,
+        jobId: jobId,
+        status: BatchItemStatus.completed,
+        segments: _segments,
+        progress: 1.0,
+      ),
+    ];
+
+    notifyListeners();
+    return true;
   }
 
   // --- Reset ---

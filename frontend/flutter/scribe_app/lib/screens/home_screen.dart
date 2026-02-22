@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/connection_provider.dart';
@@ -19,6 +18,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
+  bool _isNavSidebarCollapsed = false;
   ConnectionProvider? _conn;
   VoidCallback? _connListener;
 
@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final screens = [
       const TranscriptionScreen(),
-      const JobsScreen(),
+      JobsScreen(onJobOpened: () => setState(() => _selectedIndex = 0)),
       const SettingsScreen(),
     ];
 
@@ -75,49 +75,90 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       body: Row(
         children: [
-          // Claude-style sidebar
-          Container(
-            width: 240,
-            color: sidebarBg,
+          // Sidebar
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            width: _isNavSidebarCollapsed ? 76 : 252,
+            decoration: BoxDecoration(
+              color: sidebarBg,
+              border: Border(
+                right: BorderSide(color: theme.colorScheme.outlineVariant),
+              ),
+            ),
             child: SafeArea(
               child: Column(
                 children: [
-                  // Logo / branding
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary,
-                            borderRadius: BorderRadius.circular(10),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final canShowFullHeader = constraints.maxWidth >= 180;
+                      if (!canShowFullHeader) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          child: Center(
+                            child: IconButton(
+                              tooltip: 'Expand navigation sidebar',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () {
+                                setState(() => _isNavSidebarCollapsed = false);
+                              },
+                              icon: const Icon(Icons.menu_rounded, size: 22),
+                            ),
                           ),
-                          child: const Icon(
-                            Icons.mic_rounded,
-                            color: Colors.white,
-                            size: 20,
-                          ),
+                        );
+                      }
+
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 24, 12, 10),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: Image.asset(
+                                Theme.of(context).brightness == Brightness.light
+                                    ? 'assets/images/scribe-logo-black.png'
+                                    : 'assets/images/scribe-logo-white.png',
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Scribe',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Collapse navigation sidebar',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () {
+                                setState(() => _isNavSidebarCollapsed = true);
+                              },
+                              icon: const Icon(Icons.menu_open_rounded, size: 22),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Text(
-                          'Scribe',
-                          style: GoogleFonts.instrumentSerif(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w400,
-                            color: theme.colorScheme.onSurface,
-                          ),
-                        ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
 
-                  const SizedBox(height: 16),
+                  SizedBox(height: _isNavSidebarCollapsed ? 6 : 14),
 
-                  // Navigation items
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _isNavSidebarCollapsed ? 8 : 12,
+                    ),
                     child: Column(
                       children: [
                         _SidebarItem(
@@ -127,8 +168,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           isSelected: _selectedIndex == 0,
                           onTap: () => setState(() => _selectedIndex = 0),
                           selectedBg: selectedBg,
+                          isCollapsed: _isNavSidebarCollapsed,
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         _SidebarItem(
                           icon: Icons.history_rounded,
                           selectedIcon: Icons.history_rounded,
@@ -138,13 +180,15 @@ class _HomeScreenState extends State<HomeScreen> {
                             setState(() => _selectedIndex = 1);
                             // Auto-refresh jobs when navigating to History
                             final conn = context.read<ConnectionProvider>();
-                            if (conn.state == BackendConnectionState.connected) {
+                            if (conn.state ==
+                                BackendConnectionState.connected) {
                               context.read<TranscriptionProvider>().loadJobs();
                             }
                           },
                           selectedBg: selectedBg,
+                          isCollapsed: _isNavSidebarCollapsed,
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 6),
                         _SidebarItem(
                           icon: Icons.tune_rounded,
                           selectedIcon: Icons.tune_rounded,
@@ -152,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           isSelected: _selectedIndex == 2,
                           onTap: () => setState(() => _selectedIndex = 2),
                           selectedBg: selectedBg,
+                          isCollapsed: _isNavSidebarCollapsed,
                         ),
                       ],
                     ),
@@ -183,6 +228,7 @@ class _SidebarItem extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onTap;
   final Color selectedBg;
+  final bool isCollapsed;
 
   const _SidebarItem({
     required this.icon,
@@ -191,44 +237,74 @@ class _SidebarItem extends StatelessWidget {
     required this.isSelected,
     required this.onTap,
     required this.selectedBg,
+    required this.isCollapsed,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: isSelected ? selectedBg : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                isSelected ? selectedIcon : icon,
-                size: 20,
-                color: isSelected
-                    ? theme.colorScheme.onSurface
-                    : theme.colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 12),
-              Text(
-                label,
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                  color: isSelected
-                      ? theme.colorScheme.onSurface
-                      : theme.colorScheme.onSurfaceVariant,
+    return Tooltip(
+      message: label,
+      waitDuration: const Duration(milliseconds: 500),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(10),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final canShowLabel = !isCollapsed && constraints.maxWidth >= 96;
+              final horizontalPadding = canShowLabel ? 14.0 : 6.0;
+
+              return Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: 9,
                 ),
-              ),
-            ],
+                decoration: BoxDecoration(
+                  color: isSelected ? selectedBg : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: canShowLabel
+                    ? Row(
+                        children: [
+                          Icon(
+                            isSelected ? selectedIcon : icon,
+                            size: 19,
+                            color: isSelected
+                                ? theme.colorScheme.onSurface
+                                : theme.colorScheme.onSurfaceVariant,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                                color: isSelected
+                                    ? theme.colorScheme.onSurface
+                                    : theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Center(
+                        child: Icon(
+                          isSelected ? selectedIcon : icon,
+                          size: 19,
+                          color: isSelected
+                              ? theme.colorScheme.onSurface
+                              : theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+              );
+            },
           ),
         ),
       ),

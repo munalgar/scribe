@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 import '../proto/scribe.pbgrpc.dart';
 
@@ -30,12 +29,8 @@ class StatusBadge extends StatelessWidget {
         label = 'Transcribing';
         icon = null;
       case JobStatus.COMPLETED:
-        bgColor = theme.brightness == Brightness.light
-            ? const Color(0xFFD4EDDA)
-            : const Color(0xFF1E3A28);
-        textColor = theme.brightness == Brightness.light
-            ? const Color(0xFF2D6A3F)
-            : const Color(0xFF8BC99B);
+        bgColor = theme.colorScheme.tertiaryContainer;
+        textColor = theme.colorScheme.onTertiaryContainer;
         label = 'Completed';
         icon = Icons.check_rounded;
       case JobStatus.FAILED:
@@ -56,10 +51,10 @@ class StatusBadge extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(9),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -68,22 +63,23 @@ class StatusBadge extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: SizedBox(
-                width: 12,
-                height: 12,
-                child:
-                    CircularProgressIndicator(strokeWidth: 2, color: textColor),
+                width: 11,
+                height: 11,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: textColor,
+                ),
               ),
             ),
           if (icon != null)
             Padding(
               padding: const EdgeInsets.only(right: 4),
-              child: Icon(icon, size: 14, color: textColor),
+              child: Icon(icon, size: 13, color: textColor),
             ),
           Text(
             label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+            style: theme.textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w700,
               color: textColor,
             ),
           ),

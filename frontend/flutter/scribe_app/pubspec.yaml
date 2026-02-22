@@ -32,18 +32,24 @@ dependencies:
     sdk: flutter
 
   # gRPC and Protocol Buffers
-  grpc: ^3.2.4
-  protobuf: ^2.1.0
+  grpc: ^5.0.0
+  protobuf: ^6.0.0
+  fixnum: ^1.1.1
 
   # File and path handling
   path: ^1.9.0
-  file_picker: ^8.1.4
+  file_picker: ^10.3.10
 
   # State management
   provider: ^6.1.2
 
+  # Audio playback (libmpv/ffmpeg — plays all formats, all platforms)
+  media_kit: ^1.1.10+1
+  media_kit_libs_audio: ^1.0.7
+
   # Utilities
-  google_fonts: ^6.2.1
+  google_fonts: ^8.0.1
+  intl: ^0.19.0
 
 dev_dependencies:
   flutter_test:
@@ -54,17 +60,31 @@ dev_dependencies:
   # activated in the `analysis_options.yaml` file located at the root of your
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
-  flutter_lints: ^5.0.0
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: false
+  ios: false
+  macos:
+    generate: true
+    image_path: "assets/images/scribe-logo-white.png"
+  windows:
+    generate: true
+    image_path: "assets/images/scribe-logo-white.png"
+    icon_size: 256
+  image_path: "assets/images/scribe-logo-white.png"
+  min_sdk_android: 21
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
 flutter:
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/images/scribe-logo-white.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

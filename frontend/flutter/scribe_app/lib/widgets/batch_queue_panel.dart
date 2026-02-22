@@ -20,14 +20,17 @@ class BatchQueuePanel extends StatelessWidget {
     final provider = context.watch<TranscriptionProvider>();
     final theme = Theme.of(context);
     final viewIndex = viewingBatchIndex.clamp(
-        0, provider.batchQueue.isEmpty ? 0 : provider.batchQueue.length - 1);
+      0,
+      provider.batchQueue.isEmpty ? 0 : provider.batchQueue.length - 1,
+    );
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
       decoration: BoxDecoration(
         border: Border(
-            bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
-        color: theme.colorScheme.surfaceContainerLow,
+          bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+        ),
+        color: theme.colorScheme.surfaceContainer,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -42,19 +45,19 @@ class BatchQueuePanel extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           ClipRRect(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(5),
             child: LinearProgressIndicator(
               value: provider.totalBatchFiles > 0
                   ? provider.completedBatchFiles / provider.totalBatchFiles
                   : 0,
-              minHeight: 4,
+              minHeight: 5,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 120),
+            constraints: const BoxConstraints(maxHeight: 132),
             child: ListView.builder(
               shrinkWrap: true,
               itemCount: provider.batchQueue.length,
@@ -64,7 +67,12 @@ class BatchQueuePanel extends StatelessWidget {
                 return KeyedSubtree(
                   key: ValueKey(item.filePath),
                   child: _buildBatchItemRow(
-                      item, index, isViewing, provider, theme),
+                    item,
+                    index,
+                    isViewing,
+                    provider,
+                    theme,
+                  ),
                 );
               },
             ),
@@ -74,8 +82,13 @@ class BatchQueuePanel extends StatelessWidget {
     );
   }
 
-  Widget _buildBatchItemRow(BatchItem item, int index, bool isViewing,
-      TranscriptionProvider provider, ThemeData theme) {
+  Widget _buildBatchItemRow(
+    BatchItem item,
+    int index,
+    bool isViewing,
+    TranscriptionProvider provider,
+    ThemeData theme,
+  ) {
     IconData icon;
     Color color;
     switch (item.status) {
@@ -87,9 +100,7 @@ class BatchQueuePanel extends StatelessWidget {
         color = theme.colorScheme.primary;
       case BatchItemStatus.completed:
         icon = Icons.check_circle_rounded;
-        color = theme.brightness == Brightness.light
-            ? const Color(0xFF2D6A3F)
-            : const Color(0xFF8BC99B);
+        color = theme.colorScheme.onTertiaryContainer;
       case BatchItemStatus.failed:
         icon = Icons.error_rounded;
         color = theme.colorScheme.error;
@@ -100,16 +111,16 @@ class BatchQueuePanel extends StatelessWidget {
 
     return Material(
       color: isViewing
-          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.3)
+          ? theme.colorScheme.primaryContainer.withValues(alpha: 0.38)
           : Colors.transparent,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: item.isTerminal || item.status == BatchItemStatus.running
             ? () => onViewingIndexChanged(index)
             : null,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 6),
+          padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
           child: Row(
             children: [
               Icon(icon, size: 16, color: color),
@@ -139,8 +150,11 @@ class BatchQueuePanel extends StatelessWidget {
                   width: 28,
                   height: 28,
                   child: IconButton(
-                    icon: Icon(Icons.close_rounded,
-                        size: 14, color: theme.colorScheme.onSurfaceVariant),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 14,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                     onPressed: () => provider.removePendingItem(index),
                     padding: EdgeInsets.zero,
                   ),

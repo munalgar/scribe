@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:path/path.dart' as p;
+
 import '../proto/scribe.pb.dart' as pb;
 
 enum ExportFormat {
@@ -35,12 +37,14 @@ class ExportFormatters {
       case ExportFormat.vtt:
         return toVtt(segments);
       case ExportFormat.json:
-        return toJson(segments,
-            jobId: jobId,
-            audioPath: audioPath,
-            model: model,
-            language: language,
-            createdAt: createdAt);
+        return toJson(
+          segments,
+          jobId: jobId,
+          audioPath: audioPath,
+          model: model,
+          language: language,
+          createdAt: createdAt,
+        );
       case ExportFormat.csv:
         return toCsv(segments);
     }
@@ -56,7 +60,9 @@ class ExportFormatters {
     for (var i = 0; i < sorted.length; i++) {
       final s = sorted[i];
       buf.writeln('${i + 1}');
-      buf.writeln('${_formatTime(s.start, ',')} --> ${_formatTime(s.end, ',')}');
+      buf.writeln(
+        '${_formatTime(s.start, ',')} --> ${_formatTime(s.end, ',')}',
+      );
       buf.writeln(s.text.trim());
       if (i < sorted.length - 1) buf.writeln();
     }
@@ -70,7 +76,9 @@ class ExportFormatters {
     buf.writeln();
     for (var i = 0; i < sorted.length; i++) {
       final s = sorted[i];
-      buf.writeln('${_formatTime(s.start, '.')} --> ${_formatTime(s.end, '.')}');
+      buf.writeln(
+        '${_formatTime(s.start, '.')} --> ${_formatTime(s.end, '.')}',
+      );
       buf.writeln(s.text.trim());
       if (i < sorted.length - 1) buf.writeln();
     }
@@ -86,19 +94,25 @@ class ExportFormatters {
     String? createdAt,
   }) {
     final sorted = _sorted(segments);
+    final filename = (audioPath?.isNotEmpty ?? false)
+        ? p.basename(audioPath!)
+        : null;
     final data = <String, dynamic>{
-      if (jobId != null) 'job_id': jobId,
-      if (audioPath != null && audioPath.isNotEmpty) 'audio_path': audioPath,
-      if (model != null && model.isNotEmpty) 'model': model,
-      if (language != null && language.isNotEmpty) 'language': language,
-      if (createdAt != null && createdAt.isNotEmpty) 'created_at': createdAt,
+      if (jobId?.isNotEmpty ?? false) 'job_id': jobId,
+      if (filename != null) 'filename': filename,
+      if (audioPath?.isNotEmpty ?? false) 'audio_path': audioPath,
+      if (model?.isNotEmpty ?? false) 'model': model,
+      if (language?.isNotEmpty ?? false) 'language': language,
+      if (createdAt?.isNotEmpty ?? false) 'created_at': createdAt,
       'segments': sorted
-          .map((s) => {
-                'index': s.index,
-                'start': s.start,
-                'end': s.end,
-                'text': s.text.trim(),
-              })
+          .map(
+            (s) => {
+              'index': s.index,
+              'start': s.start,
+              'end': s.end,
+              'text': s.text.trim(),
+            },
+          )
           .toList(),
     };
     const encoder = JsonEncoder.withIndent('  ');

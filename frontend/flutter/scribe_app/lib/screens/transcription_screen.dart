@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -19,14 +20,23 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
   String _selectedModel = 'base';
   bool _enableGpu = true;
   String? _language;
-  bool _translateToEnglish = false;
+  String? _translateToLanguage;
   final ScrollController _scrollController = ScrollController();
   int _viewingBatchIndex = 0;
   int _lastSegmentCount = 0;
 
+  late final Player _audioPlayer;
+
+  @override
+  void initState() {
+    super.initState();
+    _audioPlayer = Player();
+  }
+
   @override
   void dispose() {
     _scrollController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -52,8 +62,10 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
       allowMultiple: true,
     );
     if (result != null && result.files.isNotEmpty) {
-      final paths =
-          result.files.where((f) => f.path != null).map((f) => f.path!).toList();
+      final paths = result.files
+          .where((f) => f.path != null)
+          .map((f) => f.path!)
+          .toList();
       if (paths.isNotEmpty) {
         if (replace) {
           provider.selectFiles(paths);
@@ -68,13 +80,14 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
     final provider = context.read<TranscriptionProvider>();
     if (provider.selectedFilePaths.isEmpty) return;
 
+    await _audioPlayer.stop();
     setState(() => _viewingBatchIndex = 0);
 
     await provider.startBatchTranscription(
       model: _selectedModel,
       enableGpu: _enableGpu,
       language: _language,
-      translateToEnglish: _translateToEnglish,
+      translateToLanguage: _translateToLanguage,
     );
   }
 
@@ -90,22 +103,25 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
         .map((m) => m.name)
         .toList();
 
-    // Schedule state mutations for after the build frame
     if (downloadedModels.isNotEmpty &&
         !downloadedModels.contains(_selectedModel)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() => _selectedModel = downloadedModels.first);
+        if (mounted) {
+          setState(() => _selectedModel = downloadedModels.first);
+        }
       });
     }
 
-    if (provider.isTranscribing && provider.currentBatchIndex >= 0 &&
+    if (provider.isTranscribing &&
+        provider.currentBatchIndex >= 0 &&
         _viewingBatchIndex != provider.currentBatchIndex) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) setState(() => _viewingBatchIndex = provider.currentBatchIndex);
+        if (mounted) {
+          setState(() => _viewingBatchIndex = provider.currentBatchIndex);
+        }
       });
     }
 
-    // Auto-scroll only when new segments arrive
     final currentSegmentCount = provider.segments.length;
     if (currentSegmentCount == 0) {
       _lastSegmentCount = 0;
@@ -120,8 +136,12 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
         viewingBatchIndex: _viewingBatchIndex,
         onViewingIndexChanged: (i) => setState(() => _viewingBatchIndex = i),
         isConnected: isConnected,
+        audioPlayer: _audioPlayer,
       );
     }
+
+    _audioPlayer.stop();
+
     return IdleTranscriptionView(
       selectedModel: _selectedModel,
       onModelChanged: (v) => setState(() => _selectedModel = v),
@@ -129,8 +149,9 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
       onLanguageChanged: (v) => setState(() => _language = v),
       enableGpu: _enableGpu,
       onGpuChanged: (v) => setState(() => _enableGpu = v),
-      translateToEnglish: _translateToEnglish,
-      onTranslateChanged: (v) => setState(() => _translateToEnglish = v),
+      translateToLanguage: _translateToLanguage,
+      onTranslateLanguageChanged: (v) =>
+          setState(() => _translateToLanguage = v),
       downloadedModels: downloadedModels,
       isConnected: isConnected,
       onPickFiles: () => _pickFiles(replace: true),
