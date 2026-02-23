@@ -95,6 +95,16 @@ class ScribeGrpcClient {
         options: _defaultOptions,
       );
 
+  Future<pb.SaveTranscriptEditsResponse> saveTranscriptEdits(
+    String jobId,
+    List<pb.SegmentEdit> edits,
+  ) => stub.saveTranscriptEdits(
+    pb.SaveTranscriptEditsRequest()
+      ..jobId = jobId
+      ..edits.addAll(edits),
+    options: _defaultOptions,
+  );
+
   Future<pb.GetSettingsResponse> getSettings() =>
       stub.getSettings(pb.GetSettingsRequest(), options: _defaultOptions);
 

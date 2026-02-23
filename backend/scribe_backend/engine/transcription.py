@@ -353,10 +353,16 @@ class TranscriptionEngine:
 
         loop = asyncio.get_running_loop()
 
+        # Resolve to the canonical path (shared/models/<name>) so
+        # faster_whisper loads from the same directory that
+        # ModelManager.is_model_downloaded() checks.
+        model_path = self.model_manager.get_model_path(model_name)
+        model_id = str(model_path) if model_path.exists() else model_name
+
         def _load():
             try:
                 return WhisperModel(
-                    model_name,
+                    model_id,
                     device=device,
                     compute_type=compute_type,
                     download_root=str(self.model_manager.models_dir),
@@ -365,7 +371,7 @@ class TranscriptionEngine:
                 if device != "cpu":
                     logger.warning(f"GPU init failed, falling back to CPU: {e}")
                     return WhisperModel(
-                        model_name,
+                        model_id,
                         device="cpu",
                         compute_type="int8",
                         download_root=str(self.model_manager.models_dir),

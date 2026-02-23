@@ -1,6 +1,8 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../proto/scribe.pb.dart' as pb;
 import '../providers/connection_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/transcription_provider.dart';
@@ -36,8 +38,15 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final ScrollController _scrollController = ScrollController();
   String _computeType = 'auto';
   bool _dirty = false;
+
+  // Models directory editing state
+  late TextEditingController _modelsDirController;
+
+  // Models toggle: true = Downloaded, false = Available
+  bool _showDownloaded = true;
 
   // Server connection editing state
   late TextEditingController _hostController;
@@ -80,12 +89,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = context.read<AppPreferences>();
     _hostController = TextEditingController(text: prefs.serverHost);
     _portController = TextEditingController(text: prefs.serverPort.toString());
+    final settings = context.read<SettingsProvider>().settings;
+    _modelsDirController = TextEditingController(
+      text: settings?.modelsDir ?? '',
+    );
+    // Refresh the models list each time the settings screen is shown so that
+    // models downloaded implicitly (e.g. during transcription) are reflected.
+    context.read<SettingsProvider>().loadModels();
   }
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _hostController.dispose();
     _portController.dispose();
+    _modelsDirController.dispose();
     super.dispose();
   }
 
@@ -97,6 +115,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _computeType = settings.computeType.isNotEmpty
           ? settings.computeType
           : 'auto';
+      if (_modelsDirController.text.isEmpty && settings.modelsDir.isNotEmpty) {
+        _modelsDirController.text = settings.modelsDir;
+      }
     }
   }
 
@@ -107,378 +128,226 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final isConnected = conn.state == BackendConnectionState.connected;
     final theme = Theme.of(context);
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      children: [
-        Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('Settings', style: theme.textTheme.headlineLarge),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Configure transcription defaults and manage models',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+    return Scrollbar(
+      thumbVisibility: true,
+      controller: _scrollController,
+      child: ListView(
+        controller: _scrollController,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        children: [
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 680),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(28, 12, 28, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Settings', style: theme.textTheme.headlineLarge),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Configure transcription defaults and manage models',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 28),
+                    const SizedBox(height: 28),
 
-                  // Transcription defaults section
-                  _SectionCard(
-                    title: 'Transcription Defaults',
-                    children: [
-                      _SettingRow(
-                        label: 'Compute Type',
-                        description: 'Precision level for model inference',
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 200),
-                          child: DropdownButtonFormField<String>(
-                            isExpanded: true,
-                            initialValue: _computeType,
-                            decoration: const InputDecoration(
-                              border: OutlineInputBorder(),
-                              isDense: true,
+                    // Transcription defaults section
+                    _SectionCard(
+                      title: 'Transcription Defaults',
+                      children: [
+                        _SettingRow(
+                          label: 'Compute Type',
+                          description: 'Precision level for model inference',
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 200),
+                            child: DropdownButtonFormField<String>(
+                              isExpanded: true,
+                              initialValue: _computeType,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                              selectedItemBuilder: (context) => const [
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text('auto'),
+                                ),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text('int8'),
+                                ),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text('float16'),
+                                ),
+                                Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: Text('float32'),
+                                ),
+                              ],
+                              items: [
+                                DropdownMenuItem(
+                                  value: 'auto',
+                                  child: _ComputeTypeItem(
+                                    title: 'auto',
+                                    subtitle: 'Best for your hardware',
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'int8',
+                                  child: _ComputeTypeItem(
+                                    title: 'int8',
+                                    subtitle: 'Fastest, lower precision',
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'float16',
+                                  child: _ComputeTypeItem(
+                                    title: 'float16',
+                                    subtitle: 'Balanced, ideal for GPUs',
+                                  ),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'float32',
+                                  child: _ComputeTypeItem(
+                                    title: 'float32',
+                                    subtitle: 'Highest precision, slowest',
+                                  ),
+                                ),
+                              ],
+                              onChanged: (v) {
+                                setState(() {
+                                  _computeType = v ?? 'auto';
+                                  _dirty = true;
+                                });
+                              },
                             ),
-                            selectedItemBuilder: (context) => const [
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text('auto'),
-                              ),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text('int8'),
-                              ),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text('float16'),
-                              ),
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text('float32'),
-                              ),
-                            ],
-                            items: [
-                              DropdownMenuItem(
-                                value: 'auto',
-                                child: _ComputeTypeItem(
-                                  title: 'auto',
-                                  subtitle: 'Best for your hardware',
-                                ),
-                              ),
-                              DropdownMenuItem(
-                                value: 'int8',
-                                child: _ComputeTypeItem(
-                                  title: 'int8',
-                                  subtitle: 'Fastest, lower precision',
-                                ),
-                              ),
-                              DropdownMenuItem(
-                                value: 'float16',
-                                child: _ComputeTypeItem(
-                                  title: 'float16',
-                                  subtitle: 'Balanced, ideal for GPUs',
-                                ),
-                              ),
-                              DropdownMenuItem(
-                                value: 'float32',
-                                child: _ComputeTypeItem(
-                                  title: 'float32',
-                                  subtitle: 'Highest precision, slowest',
-                                ),
-                              ),
-                            ],
-                            onChanged: (v) {
-                              setState(() {
-                                _computeType = v ?? 'auto';
-                                _dirty = true;
-                              });
-                            },
                           ),
                         ),
-                      ),
-                      Divider(
-                        color: theme.colorScheme.outlineVariant,
-                        height: 1,
-                      ),
-                      _buildLanguageSetting(context, theme),
-                      if (provider.settings?.modelsDir.isNotEmpty == true) ...[
                         Divider(
                           color: theme.colorScheme.outlineVariant,
                           height: 1,
                         ),
+                        _buildLanguageSetting(context, theme),
+                        Divider(
+                          color: theme.colorScheme.outlineVariant,
+                          height: 1,
+                        ),
+                        _SettingRow(
+                          label: 'Model Storage Directory',
+                          description:
+                              'Folder where models are downloaded and loaded from',
+                          child: const SizedBox.shrink(),
+                        ),
                         Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 14,
-                          ),
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
                           child: Row(
                             children: [
-                              Icon(
-                                Icons.folder_rounded,
-                                size: 18,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 10),
                               Expanded(
-                                child: Text(
-                                  provider.settings!.modelsDir,
+                                child: TextField(
+                                  controller: _modelsDirController,
+                                  decoration: InputDecoration(
+                                    hintText: 'shared/models/',
+                                    border: const OutlineInputBorder(),
+                                    isDense: true,
+                                    prefixIcon: Icon(
+                                      Icons.folder_rounded,
+                                      size: 18,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
                                   style: ScribeTheme.monoStyle(
                                     context,
                                     fontSize: 12,
-                                    color: theme.colorScheme.onSurfaceVariant,
                                   ),
+                                  onChanged: (_) {
+                                    setState(() => _dirty = true);
+                                  },
                                 ),
                               ),
+                              const SizedBox(width: 8),
+                              IconButton.outlined(
+                                icon: const Icon(
+                                  Icons.folder_open_rounded,
+                                  size: 20,
+                                ),
+                                tooltip: 'Browse for folder',
+                                onPressed: () async {
+                                  final result = await FilePicker.platform
+                                      .getDirectoryPath(
+                                        dialogTitle:
+                                            'Select Model Storage Directory',
+                                      );
+                                  if (result != null) {
+                                    _modelsDirController.text = result;
+                                    setState(() => _dirty = true);
+                                  }
+                                },
+                              ),
                             ],
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                          child: FilledButton(
+                            onPressed: isConnected && _dirty
+                                ? () async {
+                                    final newDir = _modelsDirController.text
+                                        .trim();
+                                    await provider.updateSettings(
+                                      computeType: _computeType,
+                                      modelsDir: newDir.isNotEmpty
+                                          ? newDir
+                                          : null,
+                                    );
+                                    setState(() => _dirty = false);
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Settings saved'),
+                                        ),
+                                      );
+                                    }
+                                  }
+                                : null,
+                            child: const Text('Save Settings'),
                           ),
                         ),
                       ],
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                        child: FilledButton(
-                          onPressed: isConnected && _dirty
-                              ? () async {
-                                  await provider.updateSettings(
-                                    computeType: _computeType,
-                                  );
-                                  setState(() => _dirty = false);
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('Settings saved'),
-                                      ),
-                                    );
-                                  }
-                                }
-                              : null,
-                          child: const Text('Save Settings'),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
 
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
 
-                  // Server connection section
-                  _buildServerConnectionSection(context, conn, theme),
+                    // Server connection section
+                    _buildServerConnectionSection(context, conn, theme),
 
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
 
-                  // Model management section
-                  _SectionCard(
-                    title: 'Models',
-                    children: [
-                      if (provider.modelsError != null)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-                          child: Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.errorContainer,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.error_outline_rounded,
-                                  color: theme.colorScheme.error,
-                                  size: 18,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    provider.modelsError!,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.error,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      if (provider.models.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.all(28),
-                          child: Center(
-                            child: Text(
-                              'No models available',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        ...provider.models.indexed.map((entry) {
-                          final (i, model) = entry;
-                          final isLast = i == provider.models.length - 1;
-                          final isDownloading =
-                              provider.downloadingModel == model.name;
-                          final sizeMb = model.size.toInt() / (1024 * 1024);
-                          final sizeLabel = sizeMb >= 1024
-                              ? '${(sizeMb / 1024).toStringAsFixed(1)} GB'
-                              : '${sizeMb.toStringAsFixed(0)} MB';
+                    // Model management section
+                    _buildModelsSection(provider, isConnected, theme),
 
-                          return Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                  vertical: 10,
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            model.name,
-                                            style: theme.textTheme.titleSmall,
-                                          ),
-                                          const SizedBox(height: 2),
-                                          if (isDownloading) ...[
-                                            const SizedBox(height: 4),
-                                            ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                              child: LinearProgressIndicator(
-                                                value:
-                                                    provider.downloadProgress >
-                                                        0
-                                                    ? provider.downloadProgress
-                                                    : null,
-                                                minHeight: 6,
-                                                color:
-                                                    theme.colorScheme.primary,
-                                                backgroundColor: theme
-                                                    .colorScheme
-                                                    .surfaceContainerHighest,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              _downloadStatusLabel(provider),
-                                              style: theme.textTheme.bodySmall
-                                                  ?.copyWith(
-                                                    color: theme
-                                                        .colorScheme
-                                                        .onSurfaceVariant,
-                                                  ),
-                                            ),
-                                          ] else
-                                            Text(
-                                              sizeLabel,
-                                              style: theme.textTheme.bodySmall,
-                                            ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    if (isDownloading)
-                                      IconButton(
-                                        icon: Icon(
-                                          Icons.close_rounded,
-                                          size: 20,
-                                          color: theme
-                                              .colorScheme
-                                              .onSurfaceVariant,
-                                        ),
-                                        tooltip: 'Cancel download',
-                                        onPressed: () =>
-                                            provider.cancelDownload(),
-                                      )
-                                    else if (model.downloaded)
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: theme
-                                                  .colorScheme
-                                                  .tertiaryContainer,
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
-                                            ),
-                                            child: Text(
-                                              'Downloaded',
-                                              style: theme.textTheme.labelMedium
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w500,
-                                                    color: theme
-                                                        .colorScheme
-                                                        .onTertiaryContainer,
-                                                  ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          IconButton(
-                                            icon: Icon(
-                                              Icons.delete_outline_rounded,
-                                              size: 18,
-                                              color: theme
-                                                  .colorScheme
-                                                  .onSurfaceVariant,
-                                            ),
-                                            tooltip: 'Delete model',
-                                            onPressed: () => provider
-                                                .deleteModel(model.name),
-                                          ),
-                                        ],
-                                      )
-                                    else
-                                      OutlinedButton(
-                                        onPressed: isConnected
-                                            ? () => provider.downloadModel(
-                                                model.name,
-                                              )
-                                            : null,
-                                        child: const Text('Download'),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              if (!isLast)
-                                Divider(
-                                  color: theme.colorScheme.outlineVariant,
-                                  height: 1,
-                                  indent: 20,
-                                  endIndent: 20,
-                                ),
-                            ],
-                          );
-                        }),
-                    ],
-                  ),
+                    const SizedBox(height: 20),
 
-                  const SizedBox(height: 20),
+                    // Storage info section
+                    _buildStorageSection(context, provider, theme),
 
-                  // Storage info section
-                  _buildStorageSection(context, provider, theme),
+                    const SizedBox(height: 20),
 
-                  const SizedBox(height: 20),
+                    // About section
+                    _buildAboutSection(context, conn, theme),
 
-                  // About section
-                  _buildAboutSection(context, conn, theme),
-
-                  const SizedBox(height: 32),
-                ],
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -513,6 +382,201 @@ class _SettingsScreenState extends State<SettingsScreen> {
           onChanged: (v) => prefs.setDefaultLanguage(v),
         ),
       ),
+    );
+  }
+
+  Widget _buildModelTile(
+    pb.ModelInfo model,
+    SettingsProvider provider,
+    bool isConnected,
+    bool isLast,
+    ThemeData theme,
+  ) {
+    final isDownloading = provider.downloadingModel == model.name;
+    final sizeMb = model.size.toInt() / (1024 * 1024);
+    final sizeLabel = sizeMb >= 1024
+        ? '${(sizeMb / 1024).toStringAsFixed(1)} GB'
+        : '${sizeMb.toStringAsFixed(0)} MB';
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(model.name, style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 2),
+                    if (isDownloading) ...[
+                      const SizedBox(height: 4),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: provider.downloadProgress > 0
+                              ? provider.downloadProgress
+                              : null,
+                          minHeight: 6,
+                          color: theme.colorScheme.primary,
+                          backgroundColor:
+                              theme.colorScheme.surfaceContainerHighest,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _downloadStatusLabel(provider),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ] else
+                      Text(sizeLabel, style: theme.textTheme.bodySmall),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              if (isDownloading)
+                IconButton(
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  tooltip: 'Cancel download',
+                  onPressed: () => provider.cancelDownload(),
+                )
+              else if (model.downloaded)
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  tooltip: 'Delete model',
+                  onPressed: () => provider.deleteModel(model.name),
+                )
+              else
+                OutlinedButton(
+                  onPressed: isConnected
+                      ? () => provider.downloadModel(model.name)
+                      : null,
+                  child: const Text('Download'),
+                ),
+            ],
+          ),
+        ),
+        if (!isLast)
+          Divider(
+            color: theme.colorScheme.outlineVariant,
+            height: 1,
+            indent: 20,
+            endIndent: 20,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildModelsSection(
+    SettingsProvider provider,
+    bool isConnected,
+    ThemeData theme,
+  ) {
+    final downloaded = provider.models.where((m) => m.downloaded).toList();
+    final available = provider.models.where((m) => !m.downloaded).toList();
+    final models = _showDownloaded ? downloaded : available;
+
+    return _SectionCard(
+      title: 'Models',
+      children: [
+        // Toggle between Downloaded / Available
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<bool>(
+              segments: [
+                ButtonSegment(
+                  value: true,
+                  label: Text('Downloaded (${downloaded.length})'),
+                ),
+                ButtonSegment(
+                  value: false,
+                  label: Text('Available (${available.length})'),
+                ),
+              ],
+              selected: {_showDownloaded},
+              onSelectionChanged: (v) {
+                setState(() => _showDownloaded = v.first);
+              },
+              showSelectedIcon: false,
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ),
+        ),
+
+        // Error banner
+        if (provider.modelsError != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.errorContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.error_outline_rounded,
+                    color: theme.colorScheme.error,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      provider.modelsError!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+        // Model list
+        if (models.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(28),
+            child: Center(
+              child: Text(
+                _showDownloaded
+                    ? 'No models downloaded yet'
+                    : 'All models have been downloaded',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          )
+        else
+          ...models.indexed.map((entry) {
+            final (i, model) = entry;
+            return _buildModelTile(
+              model,
+              provider,
+              isConnected,
+              i == models.length - 1,
+              theme,
+            );
+          }),
+      ],
     );
   }
 
@@ -557,15 +621,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
-          if (isConnected && conn.latencyMs != null) ...[
-            const SizedBox(width: 6),
-            Text(
-              '${conn.latencyMs}ms',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant.withAlpha(160),
-              ),
-            ),
-          ],
         ],
       ),
       children: [

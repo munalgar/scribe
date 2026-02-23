@@ -39,6 +39,7 @@ dependencies:
   # File and path handling
   path: ^1.9.0
   file_picker: ^10.3.10
+  desktop_drop: ^0.5.0
 
   # State management
   provider: ^6.1.2
@@ -49,7 +50,7 @@ dependencies:
 
   # Utilities
   google_fonts: ^8.0.1
-  intl: ^0.19.0
+  intl: ^0.20.2
   shared_preferences: ^2.5.4
 
 dev_dependencies:
@@ -62,7 +63,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.13.1
+  flutter_launcher_icons: ^0.14.4
 
 flutter_launcher_icons:
   android: false

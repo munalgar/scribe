@@ -252,7 +252,7 @@ class BackendProcessManager extends ChangeNotifier {
     if (Platform.isMacOS) {
       // Inside macOS .app bundle: <bundle>/Contents/Resources/scribe_backend/
       final bundlePath =
-          Platform.resolvedExecutable; // .../Contents/MacOS/scribe_app
+          Platform.resolvedExecutable; // .../Contents/MacOS/Scribe
       final resourcesDir = p.join(
         p.dirname(p.dirname(bundlePath)), // .../Contents
         'Resources',

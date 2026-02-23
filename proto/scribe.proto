@@ -48,6 +48,7 @@ message Segment {
   float start = 2;
   float end = 3;
   string text = 4;
+  string edited_text = 5;
 }
 
 // Transcription request/response messages
@@ -132,6 +133,21 @@ message GetTranscriptResponse {
   string model = 5;
   string language = 6;
   string created_at = 7;
+}
+
+// Save transcript edits messages
+message SegmentEdit {
+  int32 segment_index = 1;
+  string edited_text = 2;
+}
+
+message SaveTranscriptEditsRequest {
+  string job_id = 1;
+  repeated SegmentEdit edits = 2;
+}
+
+message SaveTranscriptEditsResponse {
+  bool saved = 1;
 }
 
 // Settings management messages
@@ -222,6 +238,7 @@ service Scribe {
   rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
   rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse);
   rpc GetTranscript(GetTranscriptRequest) returns (GetTranscriptResponse);
+  rpc SaveTranscriptEdits(SaveTranscriptEditsRequest) returns (SaveTranscriptEditsResponse);
 
   // Settings management
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);

@@ -169,6 +169,14 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
       onPickFiles: () => _pickFiles(replace: true),
       onAddMoreFiles: () => _pickFiles(replace: false),
       onStartTranscription: _startTranscription,
+      onFilesDropped: (paths) {
+        final provider = context.read<TranscriptionProvider>();
+        if (provider.selectedFilePaths.isEmpty) {
+          provider.selectFiles(paths);
+        } else {
+          provider.addFiles(paths);
+        }
+      },
     );
   }
 }

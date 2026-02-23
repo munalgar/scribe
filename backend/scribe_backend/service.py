@@ -358,7 +358,8 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
                 index=seg['idx'],
                 start=seg['start'],
                 end=seg['end'],
-                text=seg['text']
+                text=seg['text'],
+                edited_text=seg.get('edited_text') or ''
             )
             for seg in segments
         ]
@@ -372,7 +373,31 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
             language=job.get('language', ''),
             created_at=job.get('created_at', '')
         )
-    
+
+    async def SaveTranscriptEdits(self, request, context):
+        """Persist user edits to transcript segments"""
+        job_id = request.job_id
+
+        job = await self.db.get_job(job_id)
+        if not job:
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND,
+                f"Job not found: {job_id}"
+            )
+            return
+
+        edits = [
+            {'segment_index': e.segment_index, 'edited_text': e.edited_text}
+            for e in request.edits
+        ]
+
+        try:
+            await self.db.save_segment_edits(job_id, edits)
+            return scribe_pb2.SaveTranscriptEditsResponse(saved=True)
+        except Exception as e:
+            logger.error(f"Failed to save transcript edits: {e}")
+            return scribe_pb2.SaveTranscriptEditsResponse(saved=False)
+
     async def GetSettings(self, request, context):
         """Get application settings"""
         settings = await self.db.get_all_settings()

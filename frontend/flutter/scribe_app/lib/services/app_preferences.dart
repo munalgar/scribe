@@ -99,9 +99,9 @@ class AppPreferences extends ChangeNotifier {
 
   /// Whether the advanced / developer UI is visible.
   ///
-  /// Defaults to `true` in debug builds and `false` in release builds.
+  /// Defaults to `false`.  Can be turned on from Settings.
   bool get devMode {
-    return _prefs.getBool(_keyDevMode) ?? kDebugMode;
+    return _prefs.getBool(_keyDevMode) ?? false;
   }
 
   Future<void> setDevMode(bool value) async {

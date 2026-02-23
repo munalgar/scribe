@@ -223,7 +223,7 @@ class Database:
     async def get_segments(self, job_id: str, after_idx: int = -1) -> List[Dict[str, Any]]:
         """Get transcript segments for a job, optionally only those after a given index"""
         query = """
-        SELECT idx, start, end, text
+        SELECT idx, start, end, text, edited_text
         FROM transcript_segments
         WHERE job_id = ? AND idx > ?
         ORDER BY idx
@@ -256,6 +256,30 @@ class Database:
 
         await asyncio.get_running_loop().run_in_executor(
             self._write_executor, _insert
+        )
+
+    async def save_segment_edits(self, job_id: str, edits: List[Dict[str, Any]]):
+        """Save edited text for specific segments of a job.
+
+        Each entry in *edits* must have 'segment_index' and 'edited_text'.
+        An empty 'edited_text' clears a previous edit.
+        """
+        query = """
+        UPDATE transcript_segments
+           SET edited_text = ?
+         WHERE job_id = ? AND idx = ?
+        """
+
+        params_list = [
+            (edit['edited_text'] or None, job_id, edit['segment_index'])
+            for edit in edits
+        ]
+
+        def _save():
+            self._write_many(query, params_list)
+
+        await asyncio.get_running_loop().run_in_executor(
+            self._write_executor, _save
         )
 
     # ------------------------------------------------------------------

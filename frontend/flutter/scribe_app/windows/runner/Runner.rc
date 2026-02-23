@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.scribe" "\0"
-            VALUE "FileDescription", "scribe_app" "\0"
+            VALUE "FileDescription", "Scribe" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "scribe_app" "\0"
+            VALUE "InternalName", "Scribe" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.scribe. All rights reserved." "\0"
-            VALUE "OriginalFilename", "scribe_app.exe" "\0"
-            VALUE "ProductName", "scribe_app" "\0"
+            VALUE "OriginalFilename", "Scribe.exe" "\0"
+            VALUE "ProductName", "Scribe" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

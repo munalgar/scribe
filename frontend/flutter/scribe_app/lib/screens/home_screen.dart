@@ -383,54 +383,49 @@ class _SidebarConnectionStatus extends StatelessWidget {
       ),
     };
 
-    return Padding(
-      padding: EdgeInsets.symmetric(horizontal: isCollapsed ? 8 : 12),
-      child: Tooltip(
-        message: conn.statusMessage,
-        waitDuration: const Duration(milliseconds: 400),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: isCollapsed ? 6 : 14,
-                vertical: 10,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showExpanded = !isCollapsed && constraints.maxWidth >= 140;
+        return Padding(
+          padding: EdgeInsets.symmetric(horizontal: showExpanded ? 12 : 8),
+          child: Tooltip(
+            message: conn.statusMessage,
+            waitDuration: const Duration(milliseconds: 400),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: showExpanded ? 14 : 6,
+                    vertical: 10,
+                  ),
+                  child: showExpanded
+                      ? Row(
+                          children: [
+                            _AnimatedDot(color: dotColor, size: 8),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : Center(child: _AnimatedDot(color: dotColor, size: 10)),
+                ),
               ),
-              child: isCollapsed
-                  ? Center(child: _AnimatedDot(color: dotColor, size: 10))
-                  : Row(
-                      children: [
-                        _AnimatedDot(color: dotColor, size: 8),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        if (conn.state == BackendConnectionState.connected &&
-                            conn.latencyMs != null)
-                          Text(
-                            '${conn.latencyMs}ms',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant
-                                  .withAlpha(160),
-                              fontSize: 11,
-                            ),
-                          ),
-                      ],
-                    ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

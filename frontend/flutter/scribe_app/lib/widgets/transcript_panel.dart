@@ -11,6 +11,7 @@ class TranscriptPanel extends StatefulWidget {
   final ValueChanged<Duration>? onSeek;
   final bool isTranscribing;
   final ScrollController scrollController;
+  final Map<int, String> initialEdits;
 
   const TranscriptPanel({
     super.key,
@@ -20,6 +21,7 @@ class TranscriptPanel extends StatefulWidget {
     this.onSeek,
     this.isTranscribing = false,
     required this.scrollController,
+    this.initialEdits = const {},
   });
 
   @override
@@ -51,6 +53,9 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     _searchController = TextEditingController();
     _searchFocusNode = FocusNode();
     _editedTexts = {};
+    if (widget.initialEdits.isNotEmpty) {
+      _editedTexts = Map.from(widget.initialEdits);
+    }
   }
 
   @override
@@ -66,6 +71,11 @@ class TranscriptPanelState extends State<TranscriptPanel> {
   @override
   void didUpdateWidget(TranscriptPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Restore edits when loading a new job with saved edits
+    if (widget.initialEdits != oldWidget.initialEdits &&
+        widget.initialEdits.isNotEmpty) {
+      _editedTexts = Map.from(widget.initialEdits);
+    }
     if (widget.isPlaying && widget.segments.isNotEmpty) {
       _autoScrollToCurrentSegment();
     }
@@ -92,7 +102,8 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     final currentOffset = widget.scrollController.offset;
     final viewportHeight = widget.scrollController.position.viewportDimension;
 
-    if (targetOffset < currentOffset || targetOffset > currentOffset + viewportHeight - 80) {
+    if (targetOffset < currentOffset ||
+        targetOffset > currentOffset + viewportHeight - 80) {
       widget.scrollController.animateTo(
         (targetOffset - viewportHeight / 3).clamp(0.0, maxScroll),
         duration: const Duration(milliseconds: 200),
@@ -175,7 +186,8 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     if (_searchMatches.isEmpty) return;
     setState(() {
       _searchMatchIndex =
-          (_searchMatchIndex - 1 + _searchMatches.length) % _searchMatches.length;
+          (_searchMatchIndex - 1 + _searchMatches.length) %
+          _searchMatches.length;
     });
     _scrollToSearchMatch(_searchMatchIndex);
   }
@@ -198,11 +210,14 @@ class TranscriptPanelState extends State<TranscriptPanel> {
   }
 
   String getFullEditedTranscript() {
-    final sorted = [...widget.segments]..sort((a, b) => a.index.compareTo(b.index));
+    final sorted = [...widget.segments]
+      ..sort((a, b) => a.index.compareTo(b.index));
     return sorted.map((s) => _editedTexts[s.index] ?? s.text).join(' ');
   }
 
   Map<int, String> get editedTexts => Map.unmodifiable(_editedTexts);
+
+  bool get hasEdits => _editedTexts.isNotEmpty;
 
   List<pb.Segment> getSegmentsWithEdits() {
     return widget.segments.map((s) {
@@ -239,15 +254,15 @@ class TranscriptPanelState extends State<TranscriptPanel> {
             Expanded(
               child: widget.segments.isEmpty
                   ? _buildEmptyState(theme)
-                  : ListView.builder(
+                  : Scrollbar(
+                      thumbVisibility: true,
                       controller: widget.scrollController,
-                      padding: const EdgeInsets.fromLTRB(28, 14, 28, 28),
-                      itemCount: widget.segments.length,
-                      itemBuilder: (context, index) => _buildSegmentRow(
-                        context,
-                        index,
-                        currentIdx,
-                        theme,
+                      child: ListView.builder(
+                        controller: widget.scrollController,
+                        padding: const EdgeInsets.fromLTRB(28, 14, 28, 28),
+                        itemCount: widget.segments.length,
+                        itemBuilder: (context, index) =>
+                            _buildSegmentRow(context, index, currentIdx, theme),
                       ),
                     ),
             ),
@@ -307,8 +322,11 @@ class TranscriptPanelState extends State<TranscriptPanel> {
             width: 28,
             height: 28,
             child: IconButton(
-              icon: Icon(Icons.keyboard_arrow_up_rounded, size: 18,
-                  color: theme.colorScheme.onSurfaceVariant),
+              icon: Icon(
+                Icons.keyboard_arrow_up_rounded,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               onPressed: _prevSearchMatch,
               padding: EdgeInsets.zero,
               tooltip: 'Previous match',
@@ -318,8 +336,11 @@ class TranscriptPanelState extends State<TranscriptPanel> {
             width: 28,
             height: 28,
             child: IconButton(
-              icon: Icon(Icons.keyboard_arrow_down_rounded, size: 18,
-                  color: theme.colorScheme.onSurfaceVariant),
+              icon: Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 18,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               onPressed: _nextSearchMatch,
               padding: EdgeInsets.zero,
               tooltip: 'Next match',
@@ -330,8 +351,11 @@ class TranscriptPanelState extends State<TranscriptPanel> {
             width: 28,
             height: 28,
             child: IconButton(
-              icon: Icon(Icons.close_rounded, size: 16,
-                  color: theme.colorScheme.onSurfaceVariant),
+              icon: Icon(
+                Icons.close_rounded,
+                size: 16,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               onPressed: _toggleSearch,
               padding: EdgeInsets.zero,
               tooltip: 'Close search',
@@ -386,7 +410,8 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     final seg = widget.segments[index];
     final isCurrent = index == currentPlayingIdx;
     final isSearchMatch = _searchMatches.contains(index);
-    final isActiveMatch = _searchMatches.isNotEmpty &&
+    final isActiveMatch =
+        _searchMatches.isNotEmpty &&
         _searchMatchIndex < _searchMatches.length &&
         _searchMatches[_searchMatchIndex] == index;
     final isEditing = _editingIndex == index;
@@ -401,17 +426,14 @@ class TranscriptPanelState extends State<TranscriptPanel> {
         color: isActiveMatch
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.35)
             : isCurrent
-                ? theme.colorScheme.primaryContainer.withValues(alpha: 0.2)
-                : isSearchMatch
-                    ? theme.colorScheme.primaryContainer.withValues(alpha: 0.1)
-                    : Colors.transparent,
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.2)
+            : isSearchMatch
+            ? theme.colorScheme.primaryContainer.withValues(alpha: 0.1)
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
         border: isCurrent
             ? Border(
-                left: BorderSide(
-                  color: theme.colorScheme.primary,
-                  width: 3,
-                ),
+                left: BorderSide(color: theme.colorScheme.primary, width: 3),
               )
             : null,
       ),
@@ -518,13 +540,15 @@ class TranscriptPanelState extends State<TranscriptPanel> {
       if (idx > start) {
         spans.add(TextSpan(text: text.substring(start, idx)));
       }
-      spans.add(TextSpan(
-        text: text.substring(idx, idx + _searchQuery.length),
-        style: TextStyle(
-          backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.3),
-          fontWeight: FontWeight.w600,
+      spans.add(
+        TextSpan(
+          text: text.substring(idx, idx + _searchQuery.length),
+          style: TextStyle(
+            backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.3),
+            fontWeight: FontWeight.w600,
+          ),
         ),
-      ));
+      );
       start = idx + _searchQuery.length;
     }
 
@@ -568,16 +592,22 @@ class TranscriptPanelState extends State<TranscriptPanel> {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              icon: Icon(Icons.check_rounded, size: 16,
-                  color: theme.colorScheme.primary),
+              icon: Icon(
+                Icons.check_rounded,
+                size: 16,
+                color: theme.colorScheme.primary,
+              ),
               onPressed: () => _commitEdit(index),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
               tooltip: 'Save',
             ),
             IconButton(
-              icon: Icon(Icons.close_rounded, size: 16,
-                  color: theme.colorScheme.onSurfaceVariant),
+              icon: Icon(
+                Icons.close_rounded,
+                size: 16,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               onPressed: _cancelEdit,
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),

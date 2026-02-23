@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS transcript_segments (
     start REAL NOT NULL,
     end REAL NOT NULL,
     text TEXT NOT NULL,
+    edited_text TEXT,
     created_at TEXT NOT NULL,
     FOREIGN KEY(job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
 );

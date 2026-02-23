@@ -33,10 +33,14 @@ class SettingsProvider extends ChangeNotifier {
 
   /// Estimated seconds remaining, or null if not enough data.
   int? get downloadEtaSeconds {
-    if (_downloadStartTime == null || _downloadedBytes <= 0 || _totalBytes <= 0) {
+    if (_downloadStartTime == null ||
+        _downloadedBytes <= 0 ||
+        _totalBytes <= 0) {
       return null;
     }
-    final elapsed = DateTime.now().difference(_downloadStartTime!).inMilliseconds;
+    final elapsed = DateTime.now()
+        .difference(_downloadStartTime!)
+        .inMilliseconds;
     if (elapsed < 500) return null; // need at least 0.5s of data
     final bytesPerMs = _downloadedBytes / elapsed;
     final remaining = _totalBytes - _downloadedBytes;
@@ -60,14 +64,14 @@ class SettingsProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> updateSettings({
-    String? computeType,
-  }) async {
+  Future<void> updateSettings({String? computeType, String? modelsDir}) async {
     if (_client == null) return;
     try {
       final s = pb.Settings();
       if (computeType != null) s.computeType = computeType;
-      if (_settings?.modelsDir.isNotEmpty == true) {
+      if (modelsDir != null) {
+        s.modelsDir = modelsDir;
+      } else if (_settings?.modelsDir.isNotEmpty == true) {
         s.modelsDir = _settings!.modelsDir;
       }
       final response = await _client!.updateSettings(s);
@@ -112,7 +116,8 @@ class SettingsProvider extends ChangeNotifier {
             _downloadStartTime = DateTime.now();
             _totalBytes = progress.totalBytes.toInt();
             notifyListeners();
-          } else if (progress.status == pb.DownloadStatus.DOWNLOAD_DOWNLOADING) {
+          } else if (progress.status ==
+              pb.DownloadStatus.DOWNLOAD_DOWNLOADING) {
             _downloadedBytes = progress.downloadedBytes.toInt();
             _totalBytes = progress.totalBytes.toInt();
             _downloadStartTime ??= DateTime.now();

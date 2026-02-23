@@ -41,6 +41,16 @@ def init_database():
         
         conn.executescript(schema)
         
+        # Migrate: add edited_text column if missing
+        cursor = conn.execute("PRAGMA table_info(transcript_segments)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if 'edited_text' not in columns:
+            conn.execute(
+                "ALTER TABLE transcript_segments ADD COLUMN edited_text TEXT"
+            )
+            conn.commit()
+            logger.info("Migrated: added edited_text column")
+
         # Enable WAL mode for better concurrency
         conn.execute("PRAGMA journal_mode=WAL")
         conn.commit()

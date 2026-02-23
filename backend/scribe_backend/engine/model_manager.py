@@ -42,7 +42,7 @@ class DownloadCanceled(Exception):
 
 
 class _ProgressTqdm(tqdm):
-    """Custom tqdm that reports progress via a callback and supports cancellation."""
+    """Custom tqdm that reports byte-level progress via a callback and supports cancellation."""
 
     def __init__(self, *args, progress_callback=None, cancel_event=None, **kwargs):
         self._progress_callback = progress_callback
@@ -155,17 +155,20 @@ class ModelManager:
             logger.info(f"Model {model_name} already downloaded")
             return str(self.get_model_path(model_name))
         
-        # Download the model using faster-whisper
+        # Download the model using huggingface_hub (same path as
+        # download_model_with_progress so is_model_downloaded detects it).
+        repo_id = _MODEL_REPOS.get(model_name)
+        if repo_id is None:
+            logger.error(f"No repo mapping for model: {model_name}")
+            return None
+
         try:
-            from faster_whisper import WhisperModel
             logger.info(f"Downloading model {model_name}...")
-            
-            # This will download the model if not present
-            model = WhisperModel(
-                model_name,
-                device="cpu",  # Use CPU for download
-                compute_type="int8",
-                download_root=str(self.models_dir)
+            output_dir = str(self.models_dir / model_name)
+            huggingface_hub.snapshot_download(
+                repo_id,
+                local_dir=output_dir,
+                allow_patterns=_ALLOW_PATTERNS,
             )
             
             logger.info(f"Model {model_name} downloaded successfully")
@@ -205,31 +208,66 @@ class ModelManager:
         cancel_event = threading.Event()
         self._active_downloads[model_name] = cancel_event
 
-        # Create a proper tqdm subclass (not a factory function) so that
-        # huggingface_hub can call class-level methods like get_lock().
-        cb = progress_callback
-        ce = cancel_event
-
-        class _BoundProgressTqdm(_ProgressTqdm):
-            def __init__(self, *args, **kwargs):
-                kwargs.setdefault("progress_callback", cb)
-                kwargs.setdefault("cancel_event", ce)
-                super().__init__(*args, **kwargs)
-
         output_dir = str(self.models_dir / model_name)
+
+        # Resolve which files to download from the repo that match our
+        # allow-patterns.
+        import fnmatch
+        all_files = huggingface_hub.list_repo_files(repo_id)
+        files_to_download = [
+            f for f in all_files
+            if any(fnmatch.fnmatch(f, pat) for pat in _ALLOW_PATTERNS)
+        ]
+
+        # Aggregate byte-level progress across all files.
+        # Each per-file tqdm reports its own (n, total).  We track every
+        # file's downloaded bytes and sum them to report overall progress.
+        file_progress: Dict[str, int] = {}   # filename -> bytes downloaded so far
+        total_bytes_all = 0                   # sum of all file sizes
+        lock = threading.Lock()
+
+        def _make_progress_class(filename: str):
+            """Return a tqdm subclass that aggregates this file's progress."""
+            cb = progress_callback
+            ce = cancel_event
+
+            class _FileProgress(_ProgressTqdm):
+                def __init__(self, *args, **kwargs):
+                    kwargs.setdefault("progress_callback", None)
+                    kwargs.setdefault("cancel_event", ce)
+                    super().__init__(*args, **kwargs)
+                    # Register this file's total once the bar is created.
+                    nonlocal total_bytes_all
+                    with lock:
+                        total_bytes_all += (self.total or 0)
+
+                def update(self, n=1):
+                    if ce and ce.is_set():
+                        raise DownloadCanceled("Download canceled by user")
+                    # Let tqdm handle self.n bookkeeping.
+                    super(_ProgressTqdm, self).update(n)
+                    with lock:
+                        file_progress[filename] = self.n
+                        downloaded = sum(file_progress.values())
+                    cb(downloaded, total_bytes_all)
+
+            return _FileProgress
+
         try:
-            huggingface_hub.snapshot_download(
-                repo_id,
-                local_dir=output_dir,
-                local_dir_use_symlinks=False,
-                allow_patterns=_ALLOW_PATTERNS,
-                tqdm_class=_BoundProgressTqdm,
-            )
+            for filename in files_to_download:
+                if cancel_event.is_set():
+                    raise DownloadCanceled("Download canceled by user")
+                tqdm_cls = _make_progress_class(filename)
+                huggingface_hub.hf_hub_download(
+                    repo_id,
+                    filename=filename,
+                    local_dir=output_dir,
+                    tqdm_class=tqdm_cls,
+                )
             logger.info(f"Model {model_name} downloaded successfully")
             return output_dir
         except DownloadCanceled:
             logger.info(f"Download of model {model_name} canceled")
-            # Clean up partial download
             import shutil
             model_path = self.get_model_path(model_name)
             if model_path.exists():

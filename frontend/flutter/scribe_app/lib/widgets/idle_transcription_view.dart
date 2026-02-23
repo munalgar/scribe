@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path/path.dart' as p;
+import 'package:desktop_drop/desktop_drop.dart';
 
 import '../providers/transcription_provider.dart';
 import 'option_chip.dart';
@@ -25,8 +26,19 @@ const List<_LanguageOption> _supportedLanguages = <_LanguageOption>[
 ];
 const String _bundledModel = 'base';
 
+/// Allowed audio file extensions for drag-and-drop filtering.
+const Set<String> _allowedExtensions = {
+  '.wav',
+  '.mp3',
+  '.m4a',
+  '.flac',
+  '.ogg',
+  '.mp4',
+  '.webm',
+};
+
 /// The idle state view with file picker, options, and start button.
-class IdleTranscriptionView extends StatelessWidget {
+class IdleTranscriptionView extends StatefulWidget {
   final String selectedModel;
   final ValueChanged<String> onModelChanged;
   final String? language;
@@ -40,6 +52,7 @@ class IdleTranscriptionView extends StatelessWidget {
   final VoidCallback onPickFiles;
   final VoidCallback onAddMoreFiles;
   final VoidCallback onStartTranscription;
+  final ValueChanged<List<String>> onFilesDropped;
 
   const IdleTranscriptionView({
     super.key,
@@ -56,17 +69,40 @@ class IdleTranscriptionView extends StatelessWidget {
     required this.onPickFiles,
     required this.onAddMoreFiles,
     required this.onStartTranscription,
+    required this.onFilesDropped,
   });
+
+  @override
+  State<IdleTranscriptionView> createState() => _IdleTranscriptionViewState();
+}
+
+class _IdleTranscriptionViewState extends State<IdleTranscriptionView> {
+  bool _isDragging = false;
+
+  void _handleDrop(DropDoneDetails details) {
+    setState(() => _isDragging = false);
+    final paths = details.files
+        .map((f) => f.path)
+        .where(
+          (path) =>
+              _allowedExtensions.contains(p.extension(path).toLowerCase()),
+        )
+        .toList();
+    if (paths.isNotEmpty) {
+      widget.onFilesDropped(paths);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<TranscriptionProvider>();
     final theme = Theme.of(context);
     final hasFiles = provider.selectedFilePaths.isNotEmpty;
-    final visibleSelectedModel = downloadedModels.contains(selectedModel)
-        ? selectedModel
-        : (downloadedModels.isNotEmpty
-              ? downloadedModels.first
+    final visibleSelectedModel =
+        widget.downloadedModels.contains(widget.selectedModel)
+        ? widget.selectedModel
+        : (widget.downloadedModels.isNotEmpty
+              ? widget.downloadedModels.first
               : _bundledModel);
     final isUsingNonBundledModel = visibleSelectedModel != _bundledModel;
 
@@ -90,72 +126,91 @@ class IdleTranscriptionView extends StatelessWidget {
                       ),
                       const SizedBox(height: 34),
 
-                      // File picker card
-                      Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: onPickFiles,
-                          borderRadius: BorderRadius.circular(18),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 32,
-                              vertical: 36,
-                            ),
-                            decoration: BoxDecoration(
-                              color: theme.cardTheme.color,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(
-                                color: hasFiles
-                                    ? theme.colorScheme.primary.withValues(
-                                        alpha: 0.4,
-                                      )
-                                    : theme.colorScheme.outlineVariant,
+                      // File picker card with drag-and-drop
+                      DropTarget(
+                        onDragEntered: (_) =>
+                            setState(() => _isDragging = true),
+                        onDragExited: (_) =>
+                            setState(() => _isDragging = false),
+                        onDragDone: _handleDrop,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: widget.onPickFiles,
+                            borderRadius: BorderRadius.circular(18),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                                vertical: 36,
                               ),
-                            ),
-                            child: hasFiles
-                                ? _buildSelectedFilesList(provider, theme)
-                                : Column(
-                                    children: [
-                                      Container(
-                                        width: 56,
-                                        height: 56,
-                                        decoration: BoxDecoration(
-                                          color: theme
-                                              .colorScheme
-                                              .primaryContainer,
-                                          borderRadius: BorderRadius.circular(
-                                            14,
+                              decoration: BoxDecoration(
+                                color: _isDragging
+                                    ? theme.colorScheme.primary.withValues(
+                                        alpha: 0.08,
+                                      )
+                                    : theme.cardTheme.color,
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: _isDragging
+                                      ? theme.colorScheme.primary
+                                      : hasFiles
+                                      ? theme.colorScheme.primary.withValues(
+                                          alpha: 0.4,
+                                        )
+                                      : theme.colorScheme.outlineVariant,
+                                  width: _isDragging ? 2 : 1,
+                                ),
+                              ),
+                              child: hasFiles
+                                  ? _buildSelectedFilesList(provider, theme)
+                                  : Column(
+                                      children: [
+                                        Container(
+                                          width: 56,
+                                          height: 56,
+                                          decoration: BoxDecoration(
+                                            color: theme
+                                                .colorScheme
+                                                .primaryContainer,
+                                            borderRadius: BorderRadius.circular(
+                                              14,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            _isDragging
+                                                ? Icons.file_download_rounded
+                                                : Icons.upload_file_rounded,
+                                            size: 28,
+                                            color: theme.colorScheme.primary,
                                           ),
                                         ),
-                                        child: Icon(
-                                          Icons.upload_file_rounded,
-                                          size: 28,
-                                          color: theme.colorScheme.primary,
+                                        const SizedBox(height: 16),
+                                        TextButton(
+                                          onPressed: widget.onPickFiles,
+                                          style: TextButton.styleFrom(
+                                            padding: EdgeInsets.zero,
+                                            minimumSize: Size.zero,
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
+                                          ),
+                                          child: Text(
+                                            _isDragging
+                                                ? 'Release to add files'
+                                                : 'Drop audio files or click to browse',
+                                            style: theme.textTheme.titleMedium,
+                                            textAlign: TextAlign.center,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      TextButton(
-                                        onPressed: onPickFiles,
-                                        style: TextButton.styleFrom(
-                                          padding: EdgeInsets.zero,
-                                          minimumSize: Size.zero,
-                                          tapTargetSize:
-                                              MaterialTapTargetSize.shrinkWrap,
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'WAV, MP3, M4A, FLAC, OGG, MP4, WebM',
+                                          style: theme.textTheme.bodySmall,
                                         ),
-                                        child: Text(
-                                          'Drop audio files or click to browse',
-                                          style: theme.textTheme.titleMedium,
-                                          textAlign: TextAlign.center,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        'WAV, MP3, M4A, FLAC, OGG, MP4, WebM',
-                                        style: theme.textTheme.bodySmall,
-                                      ),
-                                    ],
-                                  ),
+                                      ],
+                                    ),
+                            ),
                           ),
                         ),
                       ),
@@ -187,9 +242,9 @@ class IdleTranscriptionView extends StatelessWidget {
                                       : theme.colorScheme.onSurfaceVariant,
                                 ),
                                 items:
-                                    (downloadedModels.isEmpty
+                                    (widget.downloadedModels.isEmpty
                                             ? [_bundledModel]
-                                            : downloadedModels)
+                                            : widget.downloadedModels)
                                         .map(
                                           (m) => DropdownMenuItem(
                                             value: m,
@@ -206,26 +261,26 @@ class IdleTranscriptionView extends StatelessWidget {
                                         )
                                         .toList(),
                                 onChanged: (v) {
-                                  if (v != null) onModelChanged(v);
+                                  if (v != null) widget.onModelChanged(v);
                                 },
                               ),
                             ),
                           ),
                           OptionChip(
                             icon: Icons.language_rounded,
-                            active: language != null,
+                            active: widget.language != null,
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<String?>(
-                                value: language,
+                                value: widget.language,
                                 isDense: true,
                                 dropdownColor:
                                     theme.colorScheme.surfaceContainerHigh,
                                 borderRadius: BorderRadius.circular(10),
-                                iconEnabledColor: language != null
+                                iconEnabledColor: widget.language != null
                                     ? theme.colorScheme.primary
                                     : theme.colorScheme.onSurfaceVariant,
                                 style: theme.textTheme.labelLarge?.copyWith(
-                                  color: language != null
+                                  color: widget.language != null
                                       ? theme.colorScheme.primary
                                       : theme.colorScheme.onSurfaceVariant,
                                 ),
@@ -254,31 +309,32 @@ class IdleTranscriptionView extends StatelessWidget {
                                     ),
                                   ),
                                 ],
-                                onChanged: onLanguageChanged,
+                                onChanged: widget.onLanguageChanged,
                               ),
                             ),
                           ),
                           ToggleChip(
                             label: 'GPU',
                             icon: Icons.memory_rounded,
-                            value: enableGpu,
-                            onChanged: onGpuChanged,
+                            value: widget.enableGpu,
+                            onChanged: widget.onGpuChanged,
                           ),
                           OptionChip(
                             icon: Icons.translate_rounded,
-                            active: translateToLanguage != null,
+                            active: widget.translateToLanguage != null,
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<String?>(
-                                value: translateToLanguage,
+                                value: widget.translateToLanguage,
                                 isDense: true,
                                 dropdownColor:
                                     theme.colorScheme.surfaceContainerHigh,
                                 borderRadius: BorderRadius.circular(10),
-                                iconEnabledColor: translateToLanguage != null
+                                iconEnabledColor:
+                                    widget.translateToLanguage != null
                                     ? theme.colorScheme.primary
                                     : theme.colorScheme.onSurfaceVariant,
                                 style: theme.textTheme.labelLarge?.copyWith(
-                                  color: translateToLanguage != null
+                                  color: widget.translateToLanguage != null
                                       ? theme.colorScheme.primary
                                       : theme.colorScheme.onSurfaceVariant,
                                 ),
@@ -307,7 +363,7 @@ class IdleTranscriptionView extends StatelessWidget {
                                     ),
                                   ),
                                 ],
-                                onChanged: onTranslateLanguageChanged,
+                                onChanged: widget.onTranslateLanguageChanged,
                               ),
                             ),
                           ),
@@ -362,8 +418,8 @@ class IdleTranscriptionView extends StatelessWidget {
                               ),
                             ),
                           ),
-                          onPressed: isConnected && hasFiles
-                              ? onStartTranscription
+                          onPressed: widget.isConnected && hasFiles
+                              ? widget.onStartTranscription
                               : null,
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -464,7 +520,7 @@ class IdleTranscriptionView extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         TextButton.icon(
-          onPressed: onAddMoreFiles,
+          onPressed: widget.onAddMoreFiles,
           icon: const Icon(Icons.add_rounded, size: 18),
           label: const Text('Add more files'),
         ),

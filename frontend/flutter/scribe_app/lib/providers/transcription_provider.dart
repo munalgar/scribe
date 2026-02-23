@@ -408,6 +408,15 @@ class TranscriptionProvider extends ChangeNotifier {
     _activeJobStatus = JobStatus.COMPLETED;
     _segments = response.segments.toList();
 
+    // Restore saved edits from the segments' editedText field
+    final restoredEdits = <int, String>{};
+    for (final seg in _segments) {
+      if (seg.editedText.isNotEmpty) {
+        restoredEdits[seg.index] = seg.editedText;
+      }
+    }
+    _savedEdits = restoredEdits;
+
     final audioPath = response.audioPath.isNotEmpty
         ? response.audioPath
         : 'unknown';
@@ -427,6 +436,35 @@ class TranscriptionProvider extends ChangeNotifier {
     return true;
   }
 
+  /// Edits that were restored from a saved job, keyed by segment index.
+  Map<int, String> _savedEdits = {};
+  Map<int, String> get savedEdits => Map.unmodifiable(_savedEdits);
+
+  /// Save transcript edits to the backend for persistence.
+  Future<bool> saveTranscriptEdits(
+    String jobId,
+    Map<int, String> editedTexts,
+  ) async {
+    if (_client == null) return false;
+
+    final edits = editedTexts.entries
+        .map((e) => pb.SegmentEdit(segmentIndex: e.key, editedText: e.value))
+        .toList();
+
+    try {
+      final response = await _client!.saveTranscriptEdits(jobId, edits);
+      if (response.saved) {
+        _savedEdits = Map.from(editedTexts);
+        notifyListeners();
+      }
+      return response.saved;
+    } on GrpcError catch (e) {
+      _error = e.message ?? 'Failed to save edits';
+      notifyListeners();
+      return false;
+    }
+  }
+
   // --- Reset ---
 
   void reset() {
@@ -441,6 +479,7 @@ class TranscriptionProvider extends ChangeNotifier {
     _selectedFilePaths = [];
     _batchQueue = [];
     _currentBatchIndex = -1;
+    _savedEdits = {};
     notifyListeners();
   }
 

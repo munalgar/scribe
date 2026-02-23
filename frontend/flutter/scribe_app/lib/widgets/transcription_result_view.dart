@@ -12,6 +12,7 @@ import '../proto/scribe.pbgrpc.dart';
 import '../services/export_formatters.dart';
 import '../services/export_service.dart';
 import '../theme.dart';
+import 'export_format_dialog.dart';
 import 'audio_player_bar.dart';
 import 'batch_queue_panel.dart';
 import 'status_badge.dart';
@@ -157,6 +158,7 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                                 provider.isTranscribing &&
                                 viewingItem?.status == BatchItemStatus.running,
                             scrollController: widget.scrollController,
+                            initialEdits: provider.savedEdits,
                           ),
                         ),
                         AudioPlayerBar(
@@ -383,10 +385,7 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                 ],
               ),
             ),
-            Divider(
-              color: theme.colorScheme.outlineVariant,
-              height: 1,
-            ),
+            Divider(color: theme.colorScheme.outlineVariant, height: 1),
           ],
           if (_isUtilitySidebarCollapsed)
             Expanded(
@@ -441,6 +440,17 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                     ),
                   ),
 
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _SidebarActionButton(
+                      icon: Icons.folder_zip_outlined,
+                      label: 'Export multiple formats',
+                      enabled: isDone && displaySegments.isNotEmpty,
+                      theme: theme,
+                      onTap: () =>
+                          _exportMultiFormat(context, provider, viewingItem),
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -461,6 +471,21 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                           const SnackBar(content: Text('Copied to clipboard')),
                         );
                       },
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _SidebarActionButton(
+                      icon: Icons.save_rounded,
+                      label: 'Save edits',
+                      enabled:
+                          isDone &&
+                          displaySegments.isNotEmpty &&
+                          (viewingItem?.jobId ?? provider.activeJobId) != null,
+                      theme: theme,
+                      onTap: () => _saveEdits(context, provider, viewingItem),
                     ),
                   ),
 
@@ -524,7 +549,10 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                             const SizedBox(width: 6),
-                            Text('Shortcuts', style: theme.textTheme.labelSmall),
+                            Text(
+                              'Shortcuts',
+                              style: theme.textTheme.labelSmall,
+                            ),
                           ],
                         ),
                         const SizedBox(height: 8),
@@ -635,6 +663,36 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     return '$m:$s';
   }
 
+  Future<void> _saveEdits(
+    BuildContext context,
+    TranscriptionProvider provider,
+    BatchItem? viewingItem,
+  ) async {
+    final panelState = _transcriptKey.currentState;
+    if (panelState == null || !panelState.hasEdits) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No edits to save')));
+      }
+      return;
+    }
+
+    final jobId = viewingItem?.jobId ?? provider.activeJobId;
+    if (jobId == null) return;
+
+    final saved = await provider.saveTranscriptEdits(
+      jobId,
+      panelState.editedTexts,
+    );
+
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(saved ? 'Edits saved' : 'Failed to save edits')),
+      );
+    }
+  }
+
   Future<void> _exportTranscript(
     BuildContext context,
     ExportFormat format,
@@ -672,6 +730,56 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Exported to $savedPath')));
+    }
+  }
+
+  Future<void> _exportMultiFormat(
+    BuildContext context,
+    TranscriptionProvider provider,
+    BatchItem? viewingItem,
+  ) async {
+    final formats = await ExportFormatDialog.show(
+      context,
+      title: 'Export Transcript',
+    );
+    if (formats == null || formats.isEmpty || !context.mounted) return;
+
+    // If only one format chosen, delegate to the single-file export.
+    if (formats.length == 1) {
+      await _exportTranscript(context, formats.first, provider, viewingItem);
+      return;
+    }
+
+    final panelState = _transcriptKey.currentState;
+    final segments = panelState != null
+        ? panelState.getSegmentsWithEdits()
+        : (viewingItem?.segments ?? provider.segments);
+    if (segments.isEmpty) return;
+
+    final exportPath = provider.selectedFilePath;
+    final audioName =
+        viewingItem?.fileName ??
+        (exportPath != null ? p.basename(exportPath) : 'transcript');
+    final baseName = audioName.contains('.')
+        ? audioName.substring(0, audioName.lastIndexOf('.'))
+        : audioName;
+
+    final savedDir = await ExportService.saveMultipleFormats(
+      baseName: baseName,
+      formats: formats,
+      contentBuilder: (fmt) => ExportFormatters.format(
+        fmt,
+        segments,
+        jobId: viewingItem?.jobId ?? provider.activeJobId,
+      ),
+    );
+
+    if (savedDir != null && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Exported ${formats.length} formats to $savedDir'),
+        ),
+      );
     }
   }
 }

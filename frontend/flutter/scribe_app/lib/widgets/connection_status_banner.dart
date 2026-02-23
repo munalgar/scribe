@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -10,11 +12,42 @@ import '../theme.dart';
 /// A banner displayed at the top of the content area when the backend is not
 /// connected.  Shows the current status, a retry button, and contextual help
 /// depending on whether the backend is managed (built-in) or external.
-class ConnectionStatusBanner extends StatelessWidget {
+class ConnectionStatusBanner extends StatefulWidget {
   /// Optional callback invoked when the user taps "Open Settings".
   final VoidCallback? onOpenSettings;
 
-  const ConnectionStatusBanner({super.key, this.onOpenSettings});
+  /// How long to wait after startup before showing the error banner.
+  /// This gives the backend time to start up before alarming the user.
+  final Duration gracePeriod;
+
+  const ConnectionStatusBanner({
+    super.key,
+    this.onOpenSettings,
+    this.gracePeriod = const Duration(seconds: 5),
+  });
+
+  @override
+  State<ConnectionStatusBanner> createState() => _ConnectionStatusBannerState();
+}
+
+class _ConnectionStatusBannerState extends State<ConnectionStatusBanner> {
+  /// Whether the startup grace period has elapsed.
+  bool _gracePeriodOver = false;
+  Timer? _graceTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _graceTimer = Timer(widget.gracePeriod, () {
+      if (mounted) setState(() => _gracePeriodOver = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _graceTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -22,6 +55,12 @@ class ConnectionStatusBanner extends StatelessWidget {
 
     // Don't show when connected.
     if (conn.state == BackendConnectionState.connected) {
+      return const SizedBox.shrink();
+    }
+
+    // During the startup grace period, hide the banner so the backend
+    // has time to come up without flashing an error at the user.
+    if (!_gracePeriodOver) {
       return const SizedBox.shrink();
     }
 
@@ -67,7 +106,7 @@ class ConnectionStatusBanner extends StatelessWidget {
               ),
               if (!isConnecting) ...[
                 if (isManaged)
-                  _ManagedRetryButton(onOpenSettings: onOpenSettings)
+                  _ManagedRetryButton(onOpenSettings: widget.onOpenSettings)
                 else ...[
                   FilledButton.tonalIcon(
                     onPressed: () => conn.retry(),
@@ -79,7 +118,7 @@ class ConnectionStatusBanner extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   TextButton(
-                    onPressed: onOpenSettings,
+                    onPressed: widget.onOpenSettings,
                     style: TextButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                     ),
