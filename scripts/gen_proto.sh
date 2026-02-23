@@ -55,6 +55,24 @@ else
     exit 1
 fi
 
+# Check for protoc-gen-dart (Dart protoc plugin)
+# Required minimum version to generate code compatible with protobuf ^6.0.0
+MIN_DART_PLUGIN_VERSION=21
+if [ -d "$HOME/.pub-cache/bin" ]; then
+    export PATH="$HOME/.pub-cache/bin:$PATH"
+fi
+if ! command -v protoc-gen-dart >/dev/null 2>&1; then
+    echo "protoc-gen-dart not found. Installing protoc_plugin..."
+    dart pub global activate protoc_plugin
+elif DART_PLUGIN_VERSION=$(dart pub global list 2>/dev/null | grep protoc_plugin | sed 's/protoc_plugin //'); then
+    DART_PLUGIN_MAJOR=$(echo "$DART_PLUGIN_VERSION" | cut -d. -f1)
+    if [ "$DART_PLUGIN_MAJOR" -lt "$MIN_DART_PLUGIN_VERSION" ] 2>/dev/null; then
+        echo "protoc_plugin $DART_PLUGIN_VERSION is too old (need >=$MIN_DART_PLUGIN_VERSION.0.0 for protobuf ^6.0.0)."
+        echo "Updating protoc_plugin..."
+        dart pub global activate protoc_plugin
+    fi
+fi
+
 echo "Generating gRPC code from proto files..."
 if [ "$DRY_CHECK" = true ]; then
     dry_echo "Dry-check mode enabled; no files will be written."
@@ -91,9 +109,6 @@ fi
 
 # Generate Dart code
 echo "Generating Dart gRPC code..."
-if [ -d "$HOME/.pub-cache/bin" ]; then
-    export PATH="$HOME/.pub-cache/bin:$PATH"
-fi
 if [ "$DRY_CHECK" = true ]; then
     dry_echo "Would run: $PROTOC_BIN -I $PROTO_DIR --dart_out=grpc:$DART_OUT $PROTO_FILE"
 else

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 # Colors for output
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
@@ -104,27 +105,15 @@ if [ ! -f "backend/scribe_backend/proto/scribe_pb2.py" ]; then
     fi
 fi
 
-# Kill any process already using port 50051
+# Check if port 50051 is already in use
 PORT=50051
 if command -v lsof >/dev/null 2>&1; then
     EXISTING_PIDS="$(lsof -ti "tcp:${PORT}" 2>/dev/null | sort -u || true)"
     if [ -n "$EXISTING_PIDS" ]; then
-        for EXISTING_PID in $EXISTING_PIDS; do
-            if [ "$EXISTING_PID" != "$$" ]; then
-                if [ "$DRY_CHECK" = true ]; then
-                    dry_echo "Would stop PID $EXISTING_PID currently using port $PORT"
-                else
-                    echo -e "${YELLOW}Port $PORT in use by PID $EXISTING_PID, stopping it...${NC}"
-                    kill -9 "$EXISTING_PID" 2>/dev/null || true
-                fi
-            fi
-        done
-        if [ "$DRY_CHECK" = false ]; then
-            sleep 0.5
-        fi
+        echo -e "${RED}Error: Port $PORT is already in use (PID: $(echo $EXISTING_PIDS | tr '\n' ' ')).${NC}"
+        echo -e "${YELLOW}Stop the existing process first, then try again.${NC}"
+        exit 1
     fi
-else
-    echo -e "${YELLOW}lsof not found; skipping port cleanup on port $PORT${NC}"
 fi
 
 # Run the server (use -m for proper package imports)

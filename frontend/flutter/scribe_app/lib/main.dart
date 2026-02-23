@@ -7,6 +7,7 @@ import 'providers/connection_provider.dart';
 import 'providers/transcription_provider.dart';
 import 'providers/settings_provider.dart';
 import 'services/app_preferences.dart';
+import 'services/backend_process.dart';
 import 'screens/home_screen.dart';
 import 'theme.dart';
 
@@ -27,6 +28,7 @@ class ScribeApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: preferences),
+        ChangeNotifierProvider(create: (_) => BackendProcessManager()),
         ChangeNotifierProvider(create: (_) => ConnectionProvider()),
         ChangeNotifierProvider(create: (_) => TranscriptionProvider()),
         ChangeNotifierProvider(create: (_) => SettingsProvider()),

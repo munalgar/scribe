@@ -5,7 +5,9 @@ import '../providers/connection_provider.dart';
 import '../providers/transcription_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/app_preferences.dart';
+import '../services/backend_process.dart';
 import '../theme.dart';
+import '../widgets/connection_status_banner.dart';
 import 'transcription_screen.dart';
 import 'jobs_screen.dart';
 import 'settings_screen.dart';
@@ -44,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final transcription = context.read<TranscriptionProvider>();
     final settings = context.read<SettingsProvider>();
     final prefs = context.read<AppPreferences>();
+    final backendProcess = context.read<BackendProcessManager>();
 
     _connListener = () {
       if (_conn!.state == BackendConnectionState.connected) {
@@ -59,7 +62,32 @@ class _HomeScreenState extends State<HomeScreen> {
     };
 
     _conn!.addListener(_connListener!);
-    _conn!.connect(host: prefs.serverHost, port: prefs.serverPort);
+
+    if (prefs.backendMode == BackendMode.managed) {
+      // Auto-start the bundled backend and connect once it's ready.
+      _startManagedBackend(backendProcess, prefs);
+    } else {
+      // External mode: connect to whatever host/port is configured.
+      _conn!.connect(host: prefs.serverHost, port: prefs.serverPort);
+    }
+  }
+
+  Future<void> _startManagedBackend(
+    BackendProcessManager process,
+    AppPreferences prefs,
+  ) async {
+    try {
+      final port = await process.start();
+      // Connect to the backend on the port it chose.
+      _conn!.connect(host: '127.0.0.1', port: port);
+    } catch (e) {
+      // If the bundled binary isn't found, fall back to external mode
+      // (the user is probably a developer who hasn't built it yet).
+      debugPrint(
+        '[home] Managed backend failed: $e — falling back to external',
+      );
+      _conn!.connect(host: prefs.serverHost, port: prefs.serverPort);
+    }
   }
 
   @override
@@ -145,7 +173,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               onPressed: () {
                                 setState(() => _isNavSidebarCollapsed = true);
                               },
-                              icon: const Icon(Icons.menu_open_rounded, size: 22),
+                              icon: const Icon(
+                                Icons.menu_open_rounded,
+                                size: 22,
+                              ),
                             ),
                           ],
                         ),
@@ -203,6 +234,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
 
                   const Spacer(),
+
+                  // Connection status indicator
+                  _SidebarConnectionStatus(
+                    isCollapsed: _isNavSidebarCollapsed,
+                    onTap: () => setState(() => _selectedIndex = 2),
+                  ),
+
+                  SizedBox(height: _isNavSidebarCollapsed ? 12 : 8),
                 ],
               ),
             ),
@@ -212,7 +251,14 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: Container(
               color: theme.scaffoldBackgroundColor,
-              child: screens[_selectedIndex],
+              child: Column(
+                children: [
+                  ConnectionStatusBanner(
+                    onOpenSettings: () => setState(() => _selectedIndex = 2),
+                  ),
+                  Expanded(child: screens[_selectedIndex]),
+                ],
+              ),
             ),
           ),
         ],
@@ -308,6 +354,150 @@ class _SidebarItem extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Always-visible connection indicator at the bottom of the sidebar.
+class _SidebarConnectionStatus extends StatelessWidget {
+  final bool isCollapsed;
+  final VoidCallback onTap;
+
+  const _SidebarConnectionStatus({
+    required this.isCollapsed,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final conn = context.watch<ConnectionProvider>();
+    final theme = Theme.of(context);
+
+    final (Color dotColor, String label) = switch (conn.state) {
+      BackendConnectionState.connected => (Colors.green, 'Connected'),
+      BackendConnectionState.connecting => (Colors.orange, 'Connecting…'),
+      BackendConnectionState.error => (theme.colorScheme.error, 'Disconnected'),
+      BackendConnectionState.disconnected => (
+        theme.colorScheme.onSurfaceVariant,
+        'Offline',
+      ),
+    };
+
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: isCollapsed ? 8 : 12),
+      child: Tooltip(
+        message: conn.statusMessage,
+        waitDuration: const Duration(milliseconds: 400),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: isCollapsed ? 6 : 14,
+                vertical: 10,
+              ),
+              child: isCollapsed
+                  ? Center(child: _AnimatedDot(color: dotColor, size: 10))
+                  : Row(
+                      children: [
+                        _AnimatedDot(color: dotColor, size: 8),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        if (conn.state == BackendConnectionState.connected &&
+                            conn.latencyMs != null)
+                          Text(
+                            '${conn.latencyMs}ms',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant
+                                  .withAlpha(160),
+                              fontSize: 11,
+                            ),
+                          ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A pulsing dot for the "connecting" state, static otherwise.
+class _AnimatedDot extends StatefulWidget {
+  final Color color;
+  final double size;
+
+  const _AnimatedDot({required this.color, required this.size});
+
+  @override
+  State<_AnimatedDot> createState() => _AnimatedDotState();
+}
+
+class _AnimatedDotState extends State<_AnimatedDot>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _maybeAnimate();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AnimatedDot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _maybeAnimate();
+  }
+
+  void _maybeAnimate() {
+    // Pulse when orange (connecting).
+    if (widget.color == Colors.orange) {
+      if (!_controller.isAnimating) _controller.repeat(reverse: true);
+    } else {
+      _controller.stop();
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (_, _) {
+        return Container(
+          width: widget.size,
+          height: widget.size,
+          decoration: BoxDecoration(
+            color: widget.color.withAlpha(
+              (255 * (0.4 + 0.6 * _controller.value)).toInt(),
+            ),
+            shape: BoxShape.circle,
+          ),
+        );
+      },
     );
   }
 }

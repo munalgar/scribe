@@ -1,5 +1,6 @@
 """gRPC Server for Scribe Backend"""
 
+import argparse
 import asyncio
 import logging
 import signal
@@ -12,8 +13,21 @@ from scribe_backend.service import ScribeService
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_PORT = 50051
 
-async def serve():
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Scribe gRPC backend server")
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=_DEFAULT_PORT,
+        help=f"Port to listen on (default: {_DEFAULT_PORT})",
+    )
+    return parser.parse_args()
+
+
+async def serve(port: int = _DEFAULT_PORT):
     """Start the gRPC server"""
     # Configure logging
     coloredlogs.install(
@@ -42,10 +56,12 @@ async def serve():
     logger.info("Scribe service registered")
     
     # Listen on localhost only for security
-    listen_addr = '127.0.0.1:50051'
+    listen_addr = f'127.0.0.1:{port}'
     server.add_insecure_port(listen_addr)
     
+    # Print the ready marker so the Flutter process manager can detect it.
     logger.info(f"Server listening on {listen_addr}")
+    print(f"SCRIBE_READY port={port}", flush=True)
     
     # Start server
     await server.start()
@@ -92,8 +108,9 @@ async def serve():
 
 def main():
     """Main entry point"""
+    args = _parse_args()
     try:
-        asyncio.run(serve())
+        asyncio.run(serve(port=args.port))
     except KeyboardInterrupt:
         # asyncio.run() may still raise KeyboardInterrupt after task cancellation.
         # Treat Ctrl+C as normal shutdown to avoid noisy traceback output.

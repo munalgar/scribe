@@ -75,11 +75,9 @@ if (Get-Command protoc -ErrorAction SilentlyContinue) {
     throw "protoc not found. Install Protocol Buffers compiler."
 }
 
-Write-Host "Generating gRPC code from proto files..."
-if ($DryCheck) {
-    Write-DryCheck "Dry-check mode enabled; no files will be written."
-}
-
+# Check for protoc-gen-dart (Dart protoc plugin)
+# Required minimum version to generate code compatible with protobuf ^6.0.0
+$MinDartPluginVersion = 21
 $homeDir = if ($env:USERPROFILE) {
     $env:USERPROFILE
 } elseif ($env:HOME) {
@@ -91,6 +89,25 @@ $pubCacheBin = Join-Path $homeDir ".pub-cache/bin"
 if (Test-Path $pubCacheBin) {
     $pathSeparator = [System.IO.Path]::PathSeparator
     $env:PATH = "$pubCacheBin$pathSeparator$env:PATH"
+}
+$dartPluginInstalled = Get-Command protoc-gen-dart -ErrorAction SilentlyContinue
+if (-not $dartPluginInstalled) {
+    Write-Host "protoc-gen-dart not found. Installing protoc_plugin..."
+    dart pub global activate protoc_plugin
+} else {
+    $dartPluginList = dart pub global list 2>$null | Select-String 'protoc_plugin'
+    if ($dartPluginList -match 'protoc_plugin (\d+)') {
+        $dartPluginMajor = [int]$Matches[1]
+        if ($dartPluginMajor -lt $MinDartPluginVersion) {
+            Write-Host "protoc_plugin is too old (need >=$MinDartPluginVersion.0.0 for protobuf ^6.0.0). Updating..."
+            dart pub global activate protoc_plugin
+        }
+    }
+}
+
+Write-Host "Generating gRPC code from proto files..."
+if ($DryCheck) {
+    Write-DryCheck "Dry-check mode enabled; no files will be written."
 }
 
 # Create output directories if they don't exist

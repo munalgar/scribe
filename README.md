@@ -27,6 +27,7 @@ A cross-platform desktop application for high-performance, offline audio transcr
 - Python 3.10+ with pip
 - FFmpeg (`brew install ffmpeg`)
 - Protocol Buffers compiler (`brew install protobuf`)
+- Dart protoc plugin (`dart pub global activate protoc_plugin`)
 - Flutter SDK 3.22+ with desktop support
 - Xcode Command Line Tools
 
@@ -35,6 +36,7 @@ A cross-platform desktop application for high-performance, offline audio transcr
 - Python 3.10+ with pip
 - FFmpeg (download from ffmpeg.org)
 - Protocol Buffers compiler (download from GitHub releases)
+- Dart protoc plugin (`dart pub global activate protoc_plugin`)
 - Flutter SDK 3.22+ with desktop support
 - Visual Studio 2022 with C++ desktop development
 
@@ -43,6 +45,7 @@ A cross-platform desktop application for high-performance, offline audio transcr
 - Python 3.10+ with pip
 - FFmpeg (`sudo apt install ffmpeg`)
 - Protocol Buffers compiler (`sudo apt install protobuf-compiler`)
+- Dart protoc plugin (`dart pub global activate protoc_plugin`)
 - Flutter SDK 3.22+ with desktop support
 - Build essentials (`sudo apt install build-essential`)
 

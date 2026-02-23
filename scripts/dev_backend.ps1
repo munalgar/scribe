@@ -141,25 +141,14 @@ if (-not (Test-Path $protoOut)) {
     }
 }
 
-# Kill any process already using port 50051
+# Check if port 50051 is already in use
 $port = 50051
 $existingPids = @(Get-ListeningPids -Port $port)
 if ($existingPids.Count -gt 0) {
-    foreach ($existingPid in $existingPids) {
-        if ($existingPid -ne $PID) {
-            if ($DryCheck) {
-                Write-DryCheck "Would stop PID $existingPid currently using port $port"
-            } else {
-                Write-Host "Port $port in use by PID $existingPid, stopping it..." -ForegroundColor Yellow
-                Stop-Process -Id $existingPid -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
-    if (-not $DryCheck) {
-        Start-Sleep -Milliseconds 500
-    }
-} elseif (-not $script:IsWindowsHost -and -not (Get-Command lsof -ErrorAction SilentlyContinue)) {
-    Write-Host "lsof not found; skipping port cleanup on port $port" -ForegroundColor Yellow
+    $pidList = $existingPids -join ', '
+    Write-Host "Error: Port $port is already in use (PID: $pidList)." -ForegroundColor Red
+    Write-Host "Stop the existing process first, then try again." -ForegroundColor Yellow
+    exit 1
 }
 
 Write-Host "Starting backend server on localhost:50051" -ForegroundColor Green
