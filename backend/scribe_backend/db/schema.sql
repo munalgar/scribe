@@ -6,7 +6,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     job_id TEXT PRIMARY KEY,
     status INTEGER NOT NULL,
     audio_path TEXT,
-    audio_duration_seconds REAL DEFAULT 0.0,
     model TEXT,
     language TEXT,
     translate INTEGER DEFAULT 0,

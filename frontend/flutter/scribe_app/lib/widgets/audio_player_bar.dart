@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -183,17 +182,6 @@ class AudioPlayerBarState extends State<AudioPlayerBar> {
       return;
     }
     final requestedPath = selectedPath;
-
-    // Early check: surface a clear message when the file is missing or
-    // inaccessible (e.g. sandbox revoked access after restart).
-    if (!File(requestedPath).existsSync()) {
-      if (mounted && _sourceLoadVersion == expectedVersion) {
-        setState(() => _sourceError = 'Audio file not accessible');
-        _awaitingResolvedDuration = false;
-      }
-      return;
-    }
-
     try {
       await widget.player.open(
         Media('file:///${requestedPath.replaceAll('\\', '/')}'),

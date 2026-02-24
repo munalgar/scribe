@@ -588,6 +588,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = context.watch<AppPreferences>();
     final process = context.watch<BackendProcessManager>();
     final isManaged = prefs.backendMode == BackendMode.managed;
+    final isConnected = conn.state == BackendConnectionState.connected;
     final isDev = prefs.devMode;
 
     final (Color statusColor, String statusLabel) = switch (conn.state) {

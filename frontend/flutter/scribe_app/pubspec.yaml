@@ -1,4 +1,4 @@
-name: scribe_app
+name: Scribe
 description: "A transcription application"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -39,7 +39,7 @@ dependencies:
   # File and path handling
   path: ^1.9.0
   file_picker: ^10.3.10
-  desktop_drop: ^0.7.0
+  desktop_drop: ^0.5.0
 
   # State management
   provider: ^6.1.2
@@ -52,7 +52,6 @@ dependencies:
   google_fonts: ^8.0.1
   intl: ^0.20.2
   shared_preferences: ^2.5.4
-  path_provider: ^2.1.0
 
 dev_dependencies:
   flutter_test:

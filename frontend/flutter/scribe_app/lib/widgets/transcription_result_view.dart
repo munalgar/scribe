@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -9,7 +8,6 @@ import 'package:path/path.dart' as p;
 
 import '../models/batch_item.dart';
 import '../providers/transcription_provider.dart';
-import '../proto/scribe.pb.dart' as pb;
 import '../proto/scribe.pbgrpc.dart';
 import '../services/export_formatters.dart';
 import '../services/export_service.dart';
@@ -19,26 +17,6 @@ import 'audio_player_bar.dart';
 import 'batch_queue_panel.dart';
 import 'status_badge.dart';
 import 'transcript_panel.dart';
-
-class _TranslateLanguageOption {
-  final String code;
-  final String label;
-
-  const _TranslateLanguageOption(this.code, this.label);
-}
-
-const List<_TranslateLanguageOption> _supportedTranslationLanguages =
-    <_TranslateLanguageOption>[
-      _TranslateLanguageOption('en', 'English'),
-      _TranslateLanguageOption('es', 'Spanish'),
-      _TranslateLanguageOption('fr', 'French'),
-      _TranslateLanguageOption('de', 'German'),
-      _TranslateLanguageOption('it', 'Italian'),
-      _TranslateLanguageOption('pt', 'Portuguese'),
-      _TranslateLanguageOption('ja', 'Japanese'),
-      _TranslateLanguageOption('zh', 'Chinese'),
-      _TranslateLanguageOption('ko', 'Korean'),
-    ];
 
 class TranscriptionResultView extends StatefulWidget {
   final ScrollController scrollController;
@@ -64,13 +42,10 @@ class TranscriptionResultView extends StatefulWidget {
 class _TranscriptionResultViewState extends State<TranscriptionResultView> {
   final GlobalKey<AudioPlayerBarState> _playerBarKey = GlobalKey();
   final GlobalKey<TranscriptPanelState> _transcriptKey = GlobalKey();
-  final ScrollController _utilitySidebarScrollController = ScrollController();
 
   Duration _playbackPosition = Duration.zero;
   bool _isPlaying = false;
   bool _isUtilitySidebarCollapsed = false;
-  bool _isTranslatingTranscript = false;
-  Set<int> _selectedSegmentIndices = <int>{};
   final List<StreamSubscription> _subs = [];
 
   @override
@@ -93,7 +68,6 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     for (final s in _subs) {
       s.cancel();
     }
-    _utilitySidebarScrollController.dispose();
     super.dispose();
   }
 
@@ -129,11 +103,7 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
         (selectedPath != null ? p.basename(selectedPath) : 'Audio file');
 
     final audioPath = viewingItem?.filePath ?? provider.selectedFilePath;
-    final displayJobId = viewingItem?.jobId ?? provider.activeJobId;
-    final audioDurationHint = _durationHintFromJobSummary(
-      provider.jobs,
-      displayJobId,
-    );
+    final audioDurationHint = _durationHintFromSegments(displaySegments);
     final hasAudio = audioPath != null && isDone;
 
     return CallbackShortcuts(
@@ -143,10 +113,6 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
             _playerBarKey.currentState?.seekBackwardByStep(),
         const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): () =>
             _playerBarKey.currentState?.seekForwardByStep(),
-        const SingleActivator(LogicalKeyboardKey.keyS, control: true): () =>
-            _saveEdits(context, provider, viewingItem),
-        const SingleActivator(LogicalKeyboardKey.keyS, meta: true): () =>
-            _saveEdits(context, provider, viewingItem),
       },
       child: Focus(
         autofocus: true,
@@ -160,7 +126,6 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
               displayFileName,
               displaySegments,
               viewingItem,
-              viewIndex,
             ),
 
             if (!isDone && provider.isTranscribing)
@@ -194,19 +159,6 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                                 viewingItem?.status == BatchItemStatus.running,
                             scrollController: widget.scrollController,
                             initialEdits: provider.savedEdits,
-                            selectionScopeId:
-                                viewingItem?.jobId ?? provider.activeJobId,
-                            onSelectionChanged: (segmentIndices) {
-                              if (setEquals(
-                                _selectedSegmentIndices,
-                                segmentIndices,
-                              )) {
-                                return;
-                              }
-                              setState(() {
-                                _selectedSegmentIndices = segmentIndices;
-                              });
-                            },
                           ),
                         ),
                         AudioPlayerBar(
@@ -245,14 +197,7 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     String displayFileName,
     List<dynamic> displaySegments,
     BatchItem? viewingItem,
-    int viewIndex,
   ) {
-    final canRetryFailed =
-        !provider.isTranscribing &&
-        (provider.isBatchMode
-            ? viewingItem?.status == BatchItemStatus.failed
-            : provider.activeJobStatus == JobStatus.FAILED);
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
       decoration: BoxDecoration(
@@ -309,20 +254,6 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
             ),
           ],
           const Spacer(),
-          if (canRetryFailed) ...[
-            OutlinedButton.icon(
-              onPressed: () => provider.retryBatchItem(viewIndex),
-              icon: const Icon(Icons.refresh_rounded, size: 16),
-              label: const Text('Retry'),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 10,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
           if (isDone)
             FilledButton.icon(
               onPressed: () => provider.reset(),
@@ -414,12 +345,6 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     BatchItem? viewingItem,
     int viewIndex,
   ) {
-    final displayJobId = viewingItem?.jobId ?? provider.activeJobId;
-    final displayDuration =
-        _durationHintFromJobSummary(provider.jobs, displayJobId) ??
-        _durationHintFromSegments(displaySegments);
-    final selectedSegmentCount = _selectedSegmentIndices.length;
-
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
@@ -484,273 +409,165 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
             )
           else
             Expanded(
-              child: Scrollbar(
-                controller: _utilitySidebarScrollController,
-                thumbVisibility: true,
-                child: ListView(
-                  controller: _utilitySidebarScrollController,
-                  padding: EdgeInsets.zero,
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
-                      child: Text(
-                        'Export',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+                    child: Text(
+                      'Export',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Column(
-                        children: ExportFormat.values.map((format) {
-                          return _SidebarExportTile(
-                            format: format,
-                            enabled: isDone && displaySegments.isNotEmpty,
-                            onTap: () => _exportTranscript(
-                              context,
-                              format,
-                              provider,
-                              viewingItem,
-                            ),
-                            theme: theme,
-                          );
-                        }).toList(),
-                      ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Column(
+                      children: ExportFormat.values.map((format) {
+                        return _SidebarExportTile(
+                          format: format,
+                          enabled: isDone && displaySegments.isNotEmpty,
+                          onTap: () => _exportTranscript(
+                            context,
+                            format,
+                            provider,
+                            viewingItem,
+                          ),
+                          theme: theme,
+                        );
+                      }).toList(),
                     ),
+                  ),
 
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _SidebarActionButton(
-                        icon: Icons.folder_zip_outlined,
-                        label: 'Export multiple formats',
-                        enabled: isDone && displaySegments.isNotEmpty,
-                        theme: theme,
-                        onTap: () =>
-                            _exportMultiFormat(context, provider, viewingItem),
-                      ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _SidebarActionButton(
+                      icon: Icons.folder_zip_outlined,
+                      label: 'Export multiple formats',
+                      enabled: isDone && displaySegments.isNotEmpty,
+                      theme: theme,
+                      onTap: () =>
+                          _exportMultiFormat(context, provider, viewingItem),
                     ),
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _SidebarActionButton(
-                        icon: Icons.copy_rounded,
-                        label: 'Copy to clipboard',
-                        enabled: isDone && displaySegments.isNotEmpty,
-                        theme: theme,
-                        onTap: () {
-                          final text = _transcriptKey.currentState != null
-                              ? _transcriptKey.currentState!
-                                    .getFullEditedTranscript()
-                              : (viewingItem != null
-                                    ? provider.getTranscriptForItem(viewIndex)
-                                    : provider.getFullTranscript());
-                          Clipboard.setData(ClipboardData(text: text));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Copied to clipboard'),
-                            ),
-                          );
-                        },
-                      ),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _SidebarActionButton(
+                      icon: Icons.copy_rounded,
+                      label: 'Copy to clipboard',
+                      enabled: isDone && displaySegments.isNotEmpty,
+                      theme: theme,
+                      onTap: () {
+                        final text = _transcriptKey.currentState != null
+                            ? _transcriptKey.currentState!
+                                  .getFullEditedTranscript()
+                            : (viewingItem != null
+                                  ? provider.getTranscriptForItem(viewIndex)
+                                  : provider.getFullTranscript());
+                        Clipboard.setData(ClipboardData(text: text));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Copied to clipboard')),
+                        );
+                      },
                     ),
+                  ),
 
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _SidebarActionButton(
-                        icon: _isTranslatingTranscript
-                            ? Icons.hourglass_top_rounded
-                            : Icons.translate_rounded,
-                        label: _isTranslatingTranscript
-                            ? 'Translating...'
-                            : 'Translate transcript',
-                        enabled:
-                            isDone &&
-                            displaySegments.isNotEmpty &&
-                            (viewingItem?.jobId ?? provider.activeJobId) !=
-                                null &&
-                            !_isTranslatingTranscript,
-                        theme: theme,
-                        onTap: () => _translateTranscript(
-                          context,
-                          provider,
-                          viewingItem,
-                        ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _SidebarActionButton(
+                      icon: Icons.save_rounded,
+                      label: 'Save edits',
+                      enabled:
+                          isDone &&
+                          displaySegments.isNotEmpty &&
+                          (viewingItem?.jobId ?? provider.activeJobId) != null,
+                      theme: theme,
+                      onTap: () => _saveEdits(context, provider, viewingItem),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+                  Divider(
+                    color: theme.colorScheme.outlineVariant,
+                    height: 1,
+                    indent: 20,
+                    endIndent: 20,
+                  ),
+                  const SizedBox(height: 16),
+
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+                    child: Text(
+                      'Info',
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
-
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _SidebarActionButton(
-                        icon: _isTranslatingTranscript
-                            ? Icons.hourglass_top_rounded
-                            : Icons.short_text_rounded,
-                        label: _isTranslatingTranscript
-                            ? 'Translating selection...'
-                            : selectedSegmentCount == 1
-                            ? 'Translate selected line'
-                            : 'Translate selected lines',
-                        enabled:
-                            isDone &&
-                            displaySegments.isNotEmpty &&
-                            (viewingItem?.jobId ?? provider.activeJobId) !=
-                                null &&
-                            selectedSegmentCount > 0 &&
-                            !_isTranslatingTranscript,
-                        theme: theme,
-                        onTap: () => _translateSelectedLines(
-                          context,
-                          provider,
-                          viewingItem,
-                          _selectedSegmentIndices,
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _SidebarActionButton(
-                        icon: Icons.delete_outline_rounded,
-                        label: selectedSegmentCount == 1
-                            ? 'Delete selected line'
-                            : 'Delete selected lines',
-                        enabled:
-                            isDone &&
-                            displaySegments.isNotEmpty &&
-                            selectedSegmentCount > 0,
-                        theme: theme,
-                        onTap: () => _deleteSelectedLines(context),
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: _SidebarActionButton(
-                        icon: Icons.save_rounded,
-                        label: 'Save edits',
-                        enabled:
-                            isDone &&
-                            displaySegments.isNotEmpty &&
-                            (viewingItem?.jobId ?? provider.activeJobId) !=
-                                null,
-                        theme: theme,
-                        onTap: () => _saveEdits(context, provider, viewingItem),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-                    Divider(
-                      color: theme.colorScheme.outlineVariant,
-                      height: 1,
-                      indent: 20,
-                      endIndent: 20,
-                    ),
-                    const SizedBox(height: 16),
-
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-                      child: Text(
-                        'Info',
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
+                  ),
+                  _buildInfoRow(
+                    'Segments',
+                    '${displaySegments.length}',
+                    theme,
+                    wrap: true,
+                  ),
+                  if (displaySegments.isNotEmpty) ...[
                     _buildInfoRow(
-                      'Segments',
-                      '${displaySegments.length}',
+                      'Duration',
+                      _formatDurationFromSegments(displaySegments),
                       theme,
                       wrap: true,
                     ),
-                    if (displaySegments.isNotEmpty) ...[
-                      _buildInfoRow(
-                        'Duration',
-                        _formatDuration(displayDuration),
-                        theme,
-                        wrap: true,
-                      ),
-                    ],
-                    if (provider.activeJobId != null)
-                      _buildInfoRow(
-                        'Job',
-                        provider.activeJobId!,
-                        theme,
-                        wrap: true,
-                      ),
-
-                    const SizedBox(height: 24),
-                    Divider(
-                      color: theme.colorScheme.outlineVariant,
-                      height: 1,
-                      indent: 20,
-                      endIndent: 20,
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.keyboard_rounded,
-                                size: 14,
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Shortcuts',
-                                style: theme.textTheme.labelSmall,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          _buildShortcutHint('Space', 'Play / Pause', theme),
-                          _buildShortcutHint(
-                            'Alt + ← →',
-                            'Skip by selected step',
-                            theme,
-                          ),
-                          _buildShortcutHint(
-                            'Ctrl/Cmd + Click',
-                            'Add/remove line',
-                            theme,
-                          ),
-                          _buildShortcutHint(
-                            'Shift + Click',
-                            'Select range',
-                            theme,
-                          ),
-                          _buildShortcutHint(
-                            'Del / Backspace',
-                            'Delete selected lines',
-                            theme,
-                          ),
-                          _buildShortcutHint(
-                            'Ctrl/Cmd + S',
-                            'Save edits',
-                            theme,
-                          ),
-                          _buildShortcutHint('Ctrl/Cmd + F', 'Search', theme),
-                          _buildShortcutHint(
-                            'Click line',
-                            'Select line',
-                            theme,
-                          ),
-                          _buildShortcutHint(
-                            'Double-click',
-                            'Edit text',
-                            theme,
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
-                ),
+                  if (provider.activeJobId != null)
+                    _buildInfoRow(
+                      'Job',
+                      provider.activeJobId!,
+                      theme,
+                      wrap: true,
+                    ),
+
+                  const SizedBox(height: 24),
+                  Divider(
+                    color: theme.colorScheme.outlineVariant,
+                    height: 1,
+                    indent: 20,
+                    endIndent: 20,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.keyboard_rounded,
+                              size: 14,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Shortcuts',
+                              style: theme.textTheme.labelSmall,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        _buildShortcutHint('Space', 'Play / Pause', theme),
+                        _buildShortcutHint(
+                          'Alt + ← →',
+                          'Skip by selected step',
+                          theme,
+                        ),
+                        _buildShortcutHint('Ctrl + F', 'Search', theme),
+                        _buildShortcutHint('Double-click', 'Edit text', theme),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
         ],
@@ -835,22 +652,9 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     return Duration(milliseconds: (maxEnd * 1000).round());
   }
 
-  Duration? _durationHintFromJobSummary(
-    List<pb.JobSummary> jobs,
-    String? jobId,
-  ) {
-    if (jobId == null || jobs.isEmpty) return null;
-    for (final job in jobs) {
-      if (job.jobId != jobId) continue;
-      final seconds = job.durationSeconds;
-      if (seconds <= 0) return null;
-      return Duration(milliseconds: (seconds * 1000).floor());
-    }
-    return null;
-  }
-
-  String _formatDuration(Duration? duration) {
-    if (duration == null || duration <= Duration.zero) return '--:--';
+  String _formatDurationFromSegments(List<dynamic> segments) {
+    final duration = _durationHintFromSegments(segments);
+    if (duration == null) return '--:--';
     final totalSeconds = duration.inMilliseconds / 1000;
     final h = (totalSeconds ~/ 3600);
     final m = ((totalSeconds % 3600) ~/ 60).toString().padLeft(2, '0');
@@ -887,165 +691,6 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
         SnackBar(content: Text(saved ? 'Edits saved' : 'Failed to save edits')),
       );
     }
-  }
-
-  Future<void> _translateTranscript(
-    BuildContext context,
-    TranscriptionProvider provider,
-    BatchItem? viewingItem,
-  ) async {
-    final jobId = viewingItem?.jobId ?? provider.activeJobId;
-    if (jobId == null) return;
-
-    final targetLanguage = await _pickTargetLanguage(
-      context,
-      title: 'Translate transcript',
-    );
-    if (!mounted || targetLanguage == null) {
-      return;
-    }
-
-    await _runTranslation(
-      provider: provider,
-      jobId: jobId,
-      targetLanguage: targetLanguage,
-      successPrefix: 'Translated transcript',
-    );
-  }
-
-  Future<void> _translateSelectedLines(
-    BuildContext context,
-    TranscriptionProvider provider,
-    BatchItem? viewingItem,
-    Set<int> selectedSegmentIndices,
-  ) async {
-    final jobId = viewingItem?.jobId ?? provider.activeJobId;
-    if (jobId == null) return;
-    if (selectedSegmentIndices.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Select one or more lines first')),
-        );
-      }
-      return;
-    }
-
-    final editedTexts = _transcriptKey.currentState?.editedTexts ?? {};
-    final filteredSegmentIndices =
-        selectedSegmentIndices
-            .where(
-              (segmentIndex) =>
-                  !editedTexts.containsKey(segmentIndex) ||
-                  editedTexts[segmentIndex]!.trim().isNotEmpty,
-            )
-            .toList()
-          ..sort();
-    if (filteredSegmentIndices.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Selected lines are deleted and cannot be translated',
-            ),
-          ),
-        );
-      }
-      return;
-    }
-
-    final targetLanguage = await _pickTargetLanguage(
-      context,
-      title: filteredSegmentIndices.length == 1
-          ? 'Translate selected line'
-          : 'Translate selected lines',
-    );
-    if (!mounted || targetLanguage == null) {
-      return;
-    }
-
-    await _runTranslation(
-      provider: provider,
-      jobId: jobId,
-      targetLanguage: targetLanguage,
-      segmentIndices: filteredSegmentIndices,
-      successPrefix: filteredSegmentIndices.length == 1
-          ? 'Translated selected line'
-          : 'Translated selected lines',
-    );
-  }
-
-  Future<void> _deleteSelectedLines(BuildContext context) async {
-    final panelState = _transcriptKey.currentState;
-    final selectedCount = _selectedSegmentIndices.length;
-    if (panelState == null || selectedCount == 0) return;
-
-    panelState.deleteSegments(_selectedSegmentIndices);
-    if (!mounted) return;
-    final noun = selectedCount == 1 ? 'line' : 'lines';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Deleted $selectedCount $noun. Save edits to persist.'),
-      ),
-    );
-  }
-
-  Future<void> _runTranslation({
-    required TranscriptionProvider provider,
-    required String jobId,
-    required String targetLanguage,
-    List<int> segmentIndices = const [],
-    required String successPrefix,
-  }) async {
-    final sourceEdits = _transcriptKey.currentState?.editedTexts ?? {};
-    setState(() => _isTranslatingTranscript = true);
-    final translated = await provider.translateTranscript(
-      jobId: jobId,
-      targetLanguage: targetLanguage,
-      sourceEdits: sourceEdits,
-      segmentIndices: segmentIndices,
-    );
-    if (!mounted) return;
-    setState(() => _isTranslatingTranscript = false);
-
-    final label = _languageLabel(targetLanguage);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          translated
-              ? '$successPrefix to $label. Save edits to persist.'
-              : (provider.error ?? 'Failed to translate transcript'),
-        ),
-      ),
-    );
-  }
-
-  Future<String?> _pickTargetLanguage(
-    BuildContext context, {
-    String title = 'Translate transcript',
-  }) {
-    return showDialog<String>(
-      context: context,
-      builder: (dialogContext) => SimpleDialog(
-        title: Text(title),
-        children: _supportedTranslationLanguages
-            .map(
-              (option) => SimpleDialogOption(
-                onPressed: () => Navigator.pop(dialogContext, option.code),
-                child: Text(option.label),
-              ),
-            )
-            .toList(),
-      ),
-    );
-  }
-
-  String _languageLabel(String code) {
-    for (final option in _supportedTranslationLanguages) {
-      if (option.code == code) {
-        return option.label;
-      }
-    }
-    return code;
   }
 
   Future<void> _exportTranscript(

@@ -24,19 +24,6 @@ String _formatCreatedAt(String raw) {
   }
 }
 
-String _formatDurationSeconds(double seconds) {
-  if (seconds <= 0) return 'Duration unknown';
-  final duration = Duration(milliseconds: (seconds * 1000).floor());
-  final hours = duration.inHours;
-  final minutes = duration.inMinutes.remainder(60);
-  final secs = duration.inSeconds.remainder(60);
-
-  if (hours > 0) {
-    return '$hours:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
-  }
-  return '$minutes:${secs.toString().padLeft(2, '0')}';
-}
-
 String _jobBaseName(pb.JobSummary job) {
   if (job.audioPath.isNotEmpty) {
     final baseName = p.basenameWithoutExtension(job.audioPath);
@@ -711,7 +698,7 @@ class _JobCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_formatCreatedAt(job.createdAt)} • ${_formatDurationSeconds(job.durationSeconds)}',
+                      _formatCreatedAt(job.createdAt),
                       style: theme.textTheme.bodySmall,
                     ),
                   ],

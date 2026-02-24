@@ -159,21 +159,6 @@ class BatchQueuePanel extends StatelessWidget {
                     padding: EdgeInsets.zero,
                   ),
                 ),
-              if (item.status == BatchItemStatus.failed)
-                SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.refresh_rounded,
-                      size: 14,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    tooltip: 'Retry',
-                    onPressed: () => provider.retryBatchItem(index),
-                    padding: EdgeInsets.zero,
-                  ),
-                ),
             ],
           ),
         ),

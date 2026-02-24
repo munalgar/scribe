@@ -185,17 +185,7 @@ class Database:
         """List recent jobs"""
         query = """
         SELECT job_id, status, audio_path, model, language, translate,
-               progress, error, created_at, updated_at,
-               audio_duration_seconds AS stored_duration_seconds,
-               COALESCE(
-                   NULLIF(audio_duration_seconds, 0.0),
-                   (
-                       SELECT MAX(ts."end")
-                       FROM transcript_segments ts
-                       WHERE ts.job_id = jobs.job_id
-                   ),
-                   0.0
-               ) AS duration_seconds
+               progress, error, created_at, updated_at
         FROM jobs
         ORDER BY created_at DESC
         LIMIT ?
@@ -213,7 +203,7 @@ class Database:
         """Get a specific job"""
         query = """
         SELECT job_id, status, audio_path, model, language, translate,
-               progress, error, created_at, updated_at, audio_duration_seconds
+               progress, error, created_at, updated_at
         FROM jobs
         WHERE job_id = ?
         """
@@ -224,22 +214,6 @@ class Database:
 
         return await asyncio.get_running_loop().run_in_executor(
             self._read_executor, _get
-        )
-
-    async def update_job_audio_duration(self, job_id: str, duration_seconds: float):
-        """Persist detected audio duration for a job."""
-        now = datetime.now(timezone.utc).isoformat()
-        query = """
-        UPDATE jobs
-           SET audio_duration_seconds = ?, updated_at = ?
-         WHERE job_id = ?
-        """
-
-        def _update():
-            self._write(query, (float(duration_seconds), now, job_id))
-
-        await asyncio.get_running_loop().run_in_executor(
-            self._write_executor, _update
         )
 
     # ------------------------------------------------------------------

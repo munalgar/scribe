@@ -98,7 +98,6 @@ message JobSummary {
   string created_at = 4;
   string updated_at = 5;
   string audio_path = 6;
-  float duration_seconds = 7;
 }
 
 message ListJobsResponse {
@@ -149,22 +148,6 @@ message SaveTranscriptEditsRequest {
 
 message SaveTranscriptEditsResponse {
   bool saved = 1;
-}
-
-// Translate an already-transcribed transcript
-message TranslateTranscriptRequest {
-  string job_id = 1;
-  string target_language = 2;
-  // Optional unsaved local edits to use as the translation source text.
-  repeated SegmentEdit source_edits = 3;
-  // Optional segment indices to translate. If omitted, all segments are translated.
-  repeated int32 segment_indices = 4;
-}
-
-message TranslateTranscriptResponse {
-  bool translated = 1;
-  string target_language = 2;
-  repeated SegmentEdit translated_edits = 3;
 }
 
 // Settings management messages
@@ -256,7 +239,6 @@ service Scribe {
   rpc DeleteJob(DeleteJobRequest) returns (DeleteJobResponse);
   rpc GetTranscript(GetTranscriptRequest) returns (GetTranscriptResponse);
   rpc SaveTranscriptEdits(SaveTranscriptEditsRequest) returns (SaveTranscriptEditsResponse);
-  rpc TranslateTranscript(TranslateTranscriptRequest) returns (TranslateTranscriptResponse);
 
   // Settings management
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
