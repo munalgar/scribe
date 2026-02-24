@@ -1,8 +1,14 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../proto/scribe.pb.dart' as pb;
 import '../theme.dart';
+
+// Single-space marker keeps deletions distinguishable from "no edit" in storage.
+const String _deletedTextMarker = ' ';
 
 class TranscriptPanel extends StatefulWidget {
   final List<pb.Segment> segments;
@@ -12,6 +18,8 @@ class TranscriptPanel extends StatefulWidget {
   final bool isTranscribing;
   final ScrollController scrollController;
   final Map<int, String> initialEdits;
+  final ValueChanged<Set<int>>? onSelectionChanged;
+  final String? selectionScopeId;
 
   const TranscriptPanel({
     super.key,
@@ -22,6 +30,8 @@ class TranscriptPanel extends StatefulWidget {
     this.isTranscribing = false,
     required this.scrollController,
     this.initialEdits = const {},
+    this.onSelectionChanged,
+    this.selectionScopeId,
   });
 
   @override
@@ -30,6 +40,8 @@ class TranscriptPanel extends StatefulWidget {
 
 class TranscriptPanelState extends State<TranscriptPanel> {
   int? _editingIndex;
+  Set<int> _selectedSegmentIndices = <int>{};
+  int? _selectionAnchorListIndex;
   late TextEditingController _editController;
   late FocusNode _editFocusNode;
   final FocusNode _panelFocusNode = FocusNode();
@@ -76,6 +88,31 @@ class TranscriptPanelState extends State<TranscriptPanel> {
         widget.initialEdits.isNotEmpty) {
       _editedTexts = Map.from(widget.initialEdits);
     }
+    var selectionChanged = false;
+    if (widget.selectionScopeId != oldWidget.selectionScopeId &&
+        _selectedSegmentIndices.isNotEmpty) {
+      _selectedSegmentIndices = <int>{};
+      _selectionAnchorListIndex = null;
+      selectionChanged = true;
+    }
+
+    if (_selectedSegmentIndices.isNotEmpty) {
+      final visibleSegmentIndices = widget.segments.map((s) => s.index).toSet();
+      final pruned = _selectedSegmentIndices
+          .where((idx) => visibleSegmentIndices.contains(idx))
+          .toSet();
+      if (pruned.length != _selectedSegmentIndices.length) {
+        _selectedSegmentIndices = pruned;
+        if (_selectedSegmentIndices.isEmpty) {
+          _selectionAnchorListIndex = null;
+        }
+        selectionChanged = true;
+      }
+    }
+
+    if (selectionChanged) {
+      _emitSelectionChanged();
+    }
     if (widget.isPlaying && widget.segments.isNotEmpty) {
       _autoScrollToCurrentSegment();
     }
@@ -116,23 +153,87 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     final seg = widget.segments[index];
     final text = _editedTexts[seg.index] ?? seg.text;
     setState(() {
+      _selectedSegmentIndices = {seg.index};
+      _selectionAnchorListIndex = index;
       _editingIndex = index;
       _editController.text = text;
     });
+    _emitSelectionChanged();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _editFocusNode.requestFocus();
     });
   }
 
+  bool get _isRangeSelectionPressed {
+    final pressed = HardwareKeyboard.instance.logicalKeysPressed;
+    return pressed.contains(LogicalKeyboardKey.shiftLeft) ||
+        pressed.contains(LogicalKeyboardKey.shiftRight);
+  }
+
+  bool get _isToggleSelectionPressed {
+    final pressed = HardwareKeyboard.instance.logicalKeysPressed;
+    return pressed.contains(LogicalKeyboardKey.metaLeft) ||
+        pressed.contains(LogicalKeyboardKey.metaRight) ||
+        pressed.contains(LogicalKeyboardKey.controlLeft) ||
+        pressed.contains(LogicalKeyboardKey.controlRight);
+  }
+
+  void _emitSelectionChanged() {
+    widget.onSelectionChanged?.call(Set<int>.from(_selectedSegmentIndices));
+  }
+
+  void _selectSegment(int index) {
+    final seg = widget.segments[index];
+    final clickedSegmentIndex = seg.index;
+    final toggleSelection = _isToggleSelectionPressed;
+    final rangeSelection = _isRangeSelectionPressed;
+    Set<int> nextSelection;
+
+    if (rangeSelection && _selectionAnchorListIndex != null) {
+      final start = math.min(_selectionAnchorListIndex!, index);
+      final end = math.max(_selectionAnchorListIndex!, index);
+      final range = {
+        for (var i = start; i <= end; i++) widget.segments[i].index,
+      };
+      if (toggleSelection) {
+        nextSelection = {..._selectedSegmentIndices, ...range};
+      } else {
+        nextSelection = range;
+      }
+    } else if (toggleSelection) {
+      nextSelection = {..._selectedSegmentIndices};
+      if (!nextSelection.add(clickedSegmentIndex)) {
+        nextSelection.remove(clickedSegmentIndex);
+      }
+      _selectionAnchorListIndex = index;
+    } else {
+      nextSelection = {clickedSegmentIndex};
+      _selectionAnchorListIndex = index;
+    }
+
+    if (setEquals(nextSelection, _selectedSegmentIndices)) return;
+    setState(() {
+      _selectedSegmentIndices = nextSelection;
+      if (_selectedSegmentIndices.isEmpty) {
+        _selectionAnchorListIndex = null;
+      }
+    });
+    _emitSelectionChanged();
+  }
+
   void _commitEdit(int index) {
     final seg = widget.segments[index];
     final newText = _editController.text.trim();
-    if (newText.isNotEmpty && newText != seg.text) {
-      setState(() {
-        _editedTexts[seg.index] = newText;
-      });
-    }
-    setState(() => _editingIndex = null);
+    setState(() {
+      if (newText == seg.text) {
+        _editedTexts.remove(seg.index);
+      } else {
+        _editedTexts[seg.index] = newText.isEmpty
+            ? _deletedTextMarker
+            : newText;
+      }
+      _editingIndex = null;
+    });
   }
 
   void _cancelEdit() {
@@ -206,31 +307,70 @@ class TranscriptPanelState extends State<TranscriptPanel> {
 
   String _getSegmentText(int listIndex) {
     final seg = widget.segments[listIndex];
-    return _editedTexts[seg.index] ?? seg.text;
+    if (_editedTexts.containsKey(seg.index)) {
+      return _editedTexts[seg.index] ?? '';
+    }
+    return seg.text;
+  }
+
+  bool _isDeletedText(String text) => text.trim().isEmpty;
+
+  void deleteSegments(Iterable<int> segmentIndices) {
+    final uniqueIndices = segmentIndices.toSet();
+    if (uniqueIndices.isEmpty) return;
+    setState(() {
+      for (final segmentIndex in uniqueIndices) {
+        _editedTexts[segmentIndex] = _deletedTextMarker;
+      }
+    });
+  }
+
+  void deleteSelectedSegments() {
+    deleteSegments(_selectedSegmentIndices);
   }
 
   String getFullEditedTranscript() {
     final sorted = [...widget.segments]
       ..sort((a, b) => a.index.compareTo(b.index));
-    return sorted.map((s) => _editedTexts[s.index] ?? s.text).join(' ');
+    return sorted
+        .map(
+          (s) => _editedTexts.containsKey(s.index)
+              ? _editedTexts[s.index]!
+              : s.text,
+        )
+        .where((text) => !_isDeletedText(text))
+        .join(' ');
   }
 
   Map<int, String> get editedTexts => Map.unmodifiable(_editedTexts);
+  Set<int> get selectedSegmentIndices =>
+      Set.unmodifiable(_selectedSegmentIndices);
 
   bool get hasEdits => _editedTexts.isNotEmpty;
 
   List<pb.Segment> getSegmentsWithEdits() {
-    return widget.segments.map((s) {
-      if (_editedTexts.containsKey(s.index)) {
+    final withEdits = <pb.Segment>[];
+    for (final s in widget.segments) {
+      if (!_editedTexts.containsKey(s.index)) {
+        withEdits.add(s);
+        continue;
+      }
+      final editedText = _editedTexts[s.index] ?? '';
+      if (_isDeletedText(editedText)) {
+        continue;
+      }
+      if (editedText != s.text) {
         final edited = pb.Segment()
           ..index = s.index
           ..start = s.start
           ..end = s.end
-          ..text = _editedTexts[s.index]!;
-        return edited;
+          ..text = editedText;
+        withEdits.add(edited);
+      } else {
+        withEdits.add(s);
       }
-      return s;
-    }).toList();
+    }
+    return withEdits;
   }
 
   @override
@@ -241,6 +381,10 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     return CallbackShortcuts(
       bindings: {
         SingleActivator(LogicalKeyboardKey.keyF, control: true): _toggleSearch,
+        const SingleActivator(LogicalKeyboardKey.delete):
+            deleteSelectedSegments,
+        const SingleActivator(LogicalKeyboardKey.backspace):
+            deleteSelectedSegments,
         const SingleActivator(LogicalKeyboardKey.escape): () {
           if (_searchVisible) _toggleSearch();
           if (_editingIndex != null) _cancelEdit();
@@ -415,7 +559,9 @@ class TranscriptPanelState extends State<TranscriptPanel> {
         _searchMatchIndex < _searchMatches.length &&
         _searchMatches[_searchMatchIndex] == index;
     final isEditing = _editingIndex == index;
+    final isSelected = _selectedSegmentIndices.contains(seg.index);
     final displayText = _getSegmentText(index);
+    final isDeleted = _isDeletedText(displayText);
     final hasEdit = _editedTexts.containsKey(seg.index);
 
     return Container(
@@ -427,13 +573,20 @@ class TranscriptPanelState extends State<TranscriptPanel> {
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.35)
             : isCurrent
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.2)
+            : isSelected
+            ? theme.colorScheme.secondaryContainer.withValues(alpha: 0.2)
             : isSearchMatch
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.1)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(8),
-        border: isCurrent
+        border: (isCurrent || isSelected)
             ? Border(
-                left: BorderSide(color: theme.colorScheme.primary, width: 3),
+                left: BorderSide(
+                  color: isCurrent
+                      ? theme.colorScheme.primary
+                      : theme.colorScheme.secondary,
+                  width: 3,
+                ),
               )
             : null,
       ),
@@ -442,6 +595,7 @@ class TranscriptPanelState extends State<TranscriptPanel> {
         children: [
           GestureDetector(
             onTap: () {
+              _selectSegment(index);
               widget.onSeek?.call(
                 Duration(milliseconds: (seg.start * 1000).round()),
               );
@@ -469,6 +623,7 @@ class TranscriptPanelState extends State<TranscriptPanel> {
             child: isEditing
                 ? _buildEditor(index, theme)
                 : GestureDetector(
+                    onTap: () => _selectSegment(index),
                     onDoubleTap: () => _startEditing(index),
                     child: MouseRegion(
                       cursor: SystemMouseCursors.text,
@@ -476,6 +631,7 @@ class TranscriptPanelState extends State<TranscriptPanel> {
                         displayText,
                         isCurrent,
                         hasEdit,
+                        isDeleted,
                         theme,
                       ),
                     ),
@@ -490,10 +646,32 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     String text,
     bool isCurrent,
     bool hasEdit,
+    bool isDeleted,
     ThemeData theme,
   ) {
+    if (isDeleted) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text(
+              '[Deleted]',
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontStyle: FontStyle.italic,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          Icon(
+            Icons.delete_outline_rounded,
+            size: 14,
+            color: theme.colorScheme.error.withValues(alpha: 0.7),
+          ),
+        ],
+      );
+    }
+
     if (_searchQuery.isNotEmpty) {
-      return _buildHighlightedText(text, isCurrent, hasEdit, theme);
+      return _buildHighlightedText(text, isCurrent, hasEdit, isDeleted, theme);
     }
 
     return Row(
@@ -526,8 +704,13 @@ class TranscriptPanelState extends State<TranscriptPanel> {
     String text,
     bool isCurrent,
     bool hasEdit,
+    bool isDeleted,
     ThemeData theme,
   ) {
+    if (isDeleted) {
+      return _buildSegmentText(text, isCurrent, hasEdit, isDeleted, theme);
+    }
+
     final lowerText = text.toLowerCase();
     final spans = <TextSpan>[];
     var start = 0;

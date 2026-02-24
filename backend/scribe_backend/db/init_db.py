@@ -51,6 +51,16 @@ def init_database():
             conn.commit()
             logger.info("Migrated: added edited_text column")
 
+        # Migrate: add audio_duration_seconds column to jobs if missing
+        cursor = conn.execute("PRAGMA table_info(jobs)")
+        job_columns = {row[1] for row in cursor.fetchall()}
+        if 'audio_duration_seconds' not in job_columns:
+            conn.execute(
+                "ALTER TABLE jobs ADD COLUMN audio_duration_seconds REAL DEFAULT 0.0"
+            )
+            conn.commit()
+            logger.info("Migrated: added audio_duration_seconds column")
+
         # Enable WAL mode for better concurrency
         conn.execute("PRAGMA journal_mode=WAL")
         conn.commit()

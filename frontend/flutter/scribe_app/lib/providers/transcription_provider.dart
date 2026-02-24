@@ -4,6 +4,7 @@ import 'package:grpc/grpc.dart';
 import '../models/batch_item.dart';
 import '../proto/scribe.pb.dart' as pb;
 import '../proto/scribe.pbgrpc.dart';
+import '../services/audio_cache.dart';
 import '../services/grpc_client.dart';
 
 class TranscriptionProvider extends ChangeNotifier {
@@ -113,6 +114,15 @@ class TranscriptionProvider extends ChangeNotifier {
   }) async {
     if (_client == null || _selectedFilePaths.isEmpty) return;
 
+    // Cache audio files in the app's container so they remain accessible
+    // across restarts (macOS App Sandbox revokes picker-granted access).
+    final cachedPaths = <String>[];
+    for (final path in _selectedFilePaths) {
+      final cached = await AudioCacheService.cacheFile(path);
+      cachedPaths.add(cached ?? path);
+    }
+    _selectedFilePaths = cachedPaths;
+
     // Store batch options
     _batchModel = model;
     _batchEnableGpu = enableGpu;
@@ -178,6 +188,7 @@ class TranscriptionProvider extends ChangeNotifier {
     } on GrpcError catch (e) {
       item.status = BatchItemStatus.failed;
       item.error = e.message ?? 'Failed to start transcription';
+      _activeJobStatus = JobStatus.FAILED;
       _error = item.error;
       notifyListeners();
 
@@ -227,6 +238,7 @@ class TranscriptionProvider extends ChangeNotifier {
       },
       onError: (e) {
         item.status = BatchItemStatus.failed;
+        _activeJobStatus = JobStatus.FAILED;
         item.error = e is GrpcError
             ? (e.message ?? 'Stream error')
             : e.toString();
@@ -240,7 +252,9 @@ class TranscriptionProvider extends ChangeNotifier {
       onDone: () {
         if (!item.isTerminal) {
           item.status = BatchItemStatus.failed;
+          _activeJobStatus = JobStatus.FAILED;
           item.error = 'Stream closed unexpectedly';
+          _error = item.error;
           notifyListeners();
           if (!advancingQueue) {
             advancingQueue = true;
@@ -316,6 +330,39 @@ class TranscriptionProvider extends ChangeNotifier {
       _batchQueue[index].status = BatchItemStatus.canceled;
       notifyListeners();
     }
+  }
+
+  // --- Retry ---
+
+  Future<void> retryBatchItem(int index) async {
+    if (_client == null) return;
+    if (index < 0 || index >= _batchQueue.length) return;
+
+    final item = _batchQueue[index];
+    if (item.status != BatchItemStatus.failed) return;
+
+    item.status = BatchItemStatus.pending;
+    item.error = null;
+    item.jobId = null;
+    item.progress = 0.0;
+    item.segments = [];
+
+    if (!isBatchMode) {
+      _activeJobId = null;
+      _activeJobStatus = JobStatus.JOB_STATUS_UNSPECIFIED;
+      _segments = [];
+      _progress = 0.0;
+    }
+    _error = null;
+    notifyListeners();
+
+    if (_isTranscribing) {
+      return;
+    }
+
+    _isTranscribing = true;
+    notifyListeners();
+    await _processNextInQueue();
   }
 
   // --- Jobs ---
@@ -460,6 +507,41 @@ class TranscriptionProvider extends ChangeNotifier {
       return response.saved;
     } on GrpcError catch (e) {
       _error = e.message ?? 'Failed to save edits';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Translate a transcript into [targetLanguage] and apply the result as edits.
+  ///
+  /// This does not auto-persist to the backend; callers should still invoke
+  /// [saveTranscriptEdits] if they want to make translated text permanent.
+  Future<bool> translateTranscript({
+    required String jobId,
+    required String targetLanguage,
+    Map<int, String> sourceEdits = const {},
+    List<int> segmentIndices = const [],
+  }) async {
+    if (_client == null) return false;
+    try {
+      final response = await _client!.translateTranscript(
+        jobId: jobId,
+        targetLanguage: targetLanguage,
+        sourceEdits: sourceEdits,
+        segmentIndices: segmentIndices,
+      );
+      if (!response.translated) {
+        return false;
+      }
+      final mergedEdits = <int, String>{...sourceEdits};
+      for (final edit in response.translatedEdits) {
+        mergedEdits[edit.segmentIndex] = edit.editedText;
+      }
+      _savedEdits = mergedEdits;
+      notifyListeners();
+      return true;
+    } on GrpcError catch (e) {
+      _error = e.message ?? 'Failed to translate transcript';
       notifyListeners();
       return false;
     }

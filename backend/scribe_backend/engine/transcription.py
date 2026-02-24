@@ -206,6 +206,8 @@ class TranscriptionEngine:
             audio_duration = await loop.run_in_executor(
                 self._executor, self._get_audio_duration, audio_path
             )
+            if audio_duration > 0:
+                await self.db.update_job_audio_duration(job_id, audio_duration)
 
             # Run blocking transcription in executor
             logger.info("Starting transcription...")

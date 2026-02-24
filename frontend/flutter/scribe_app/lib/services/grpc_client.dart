@@ -105,6 +105,29 @@ class ScribeGrpcClient {
     options: _defaultOptions,
   );
 
+  Future<pb.TranslateTranscriptResponse> translateTranscript({
+    required String jobId,
+    required String targetLanguage,
+    Map<int, String> sourceEdits = const {},
+    List<int> segmentIndices = const [],
+  }) {
+    final request = pb.TranslateTranscriptRequest()
+      ..jobId = jobId
+      ..targetLanguage = targetLanguage;
+    if (sourceEdits.isNotEmpty) {
+      request.sourceEdits.addAll(
+        sourceEdits.entries.map(
+          (entry) =>
+              pb.SegmentEdit(segmentIndex: entry.key, editedText: entry.value),
+        ),
+      );
+    }
+    if (segmentIndices.isNotEmpty) {
+      request.segmentIndices.addAll(segmentIndices);
+    }
+    return stub.translateTranscript(request, options: _defaultOptions);
+  }
+
   Future<pb.GetSettingsResponse> getSettings() =>
       stub.getSettings(pb.GetSettingsRequest(), options: _defaultOptions);
 

@@ -99,7 +99,7 @@ class ExportFormatters {
         : null;
     final data = <String, dynamic>{
       if (jobId?.isNotEmpty ?? false) 'job_id': jobId,
-      if (filename != null) 'filename': filename,
+      if (filename?.isNotEmpty ?? false) 'filename': filename,
       if (audioPath?.isNotEmpty ?? false) 'audio_path': audioPath,
       if (model?.isNotEmpty ?? false) 'model': model,
       if (language?.isNotEmpty ?? false) 'language': language,

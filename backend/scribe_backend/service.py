@@ -14,7 +14,10 @@ from .proto import scribe_pb2_grpc
 
 from .db.dao import Database
 from .engine.model_manager import ModelManager
-from .engine.transcription import TranscriptionEngine
+from .engine.transcription import (
+    TranscriptionEngine,
+    _SUPPORTED_TRANSLATION_LANGUAGES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -308,18 +311,44 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         
         response = scribe_pb2.ListJobsResponse()
         for job in jobs:
+            duration_seconds = await self._resolve_job_duration_seconds(job)
             summary = scribe_pb2.JobSummary(
                 job_id=job['job_id'],
                 status=job['status'],
                 created_at=job['created_at'],
                 updated_at=job['updated_at'],
                 audio_path=job.get('audio_path', ''),
+                duration_seconds=duration_seconds,
             )
             if job.get('error'):
                 summary.error = job['error']
             response.jobs.append(summary)
         
         return response
+
+    async def _resolve_job_duration_seconds(self, job: Dict) -> float:
+        """Resolve and persist accurate duration for jobs missing it."""
+        stored = float(job.get('stored_duration_seconds') or 0.0)
+        if stored > 0:
+            return stored
+
+        audio_path = job.get('audio_path')
+        if not isinstance(audio_path, str) or not audio_path:
+            return float(job.get('duration_seconds') or 0.0)
+
+        loop = asyncio.get_running_loop()
+        duration = await loop.run_in_executor(
+            self.engine._executor,
+            self.engine._get_audio_duration,
+            audio_path,
+        )
+        if duration > 0:
+            await self.db.update_job_audio_duration(job['job_id'], duration)
+            job['stored_duration_seconds'] = duration
+            job['duration_seconds'] = duration
+            return float(duration)
+
+        return float(job.get('duration_seconds') or 0.0)
     
     async def CancelJob(self, request, context):
         """Cancel a running job"""
@@ -397,6 +426,108 @@ class ScribeService(scribe_pb2_grpc.ScribeServicer):
         except Exception as e:
             logger.error(f"Failed to save transcript edits: {e}")
             return scribe_pb2.SaveTranscriptEditsResponse(saved=False)
+
+    async def TranslateTranscript(self, request, context):
+        """Translate an existing transcript and return translated edits."""
+        job_id = request.job_id
+        target_language = (request.target_language or "").strip().lower()
+
+        if not target_language:
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                "target_language is required",
+            )
+            return
+
+        if target_language not in _SUPPORTED_TRANSLATION_LANGUAGES:
+            await context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT,
+                f"Unsupported translation language: {target_language}",
+            )
+            return
+
+        job = await self.db.get_job(job_id)
+        if not job:
+            await context.abort(
+                grpc.StatusCode.NOT_FOUND,
+                f"Job not found: {job_id}"
+            )
+            return
+
+        segments = await self.db.get_segments(job_id)
+        if not segments:
+            return scribe_pb2.TranslateTranscriptResponse(
+                translated=True,
+                target_language=target_language,
+            )
+
+        requested_indices = set(request.segment_indices)
+        if requested_indices:
+            segments = [seg for seg in segments if seg['idx'] in requested_indices]
+            if not segments:
+                await context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    "No transcript segments match the requested segment_indices",
+                )
+                return
+
+        # Caller-provided unsaved edits take precedence over persisted text.
+        # Empty edits are meaningful (deleted lines) and should suppress
+        # translation for those segments.
+        source_edits = {
+            edit.segment_index: edit.edited_text
+            for edit in request.source_edits
+        }
+
+        loop = asyncio.get_running_loop()
+        translation_cache: Dict[str, str] = {}
+        translated_edits: List[scribe_pb2.SegmentEdit] = []
+
+        try:
+            for seg in segments:
+                if seg['idx'] in source_edits:
+                    source_text = (source_edits[seg['idx']] or "").strip()
+                else:
+                    source_text = (
+                        seg.get('edited_text')
+                        or seg.get('text')
+                        or ""
+                    ).strip()
+                if not source_text:
+                    continue
+
+                translated = translation_cache.get(source_text)
+                if translated is None:
+                    translated = await loop.run_in_executor(
+                        None,
+                        self.engine._translate_text,
+                        source_text,
+                        target_language,
+                    )
+                    translation_cache[source_text] = translated
+
+                translated_edits.append(
+                    scribe_pb2.SegmentEdit(
+                        segment_index=seg['idx'],
+                        edited_text=translated,
+                    )
+                )
+        except Exception as e:
+            logger.error(
+                f"Failed to translate transcript for job {job_id}: {e}",
+                exc_info=True,
+            )
+            await context.abort(
+                grpc.StatusCode.INTERNAL,
+                f"Failed to translate transcript: {e}",
+            )
+            return
+
+        return scribe_pb2.TranslateTranscriptResponse(
+            translated=True,
+            target_language=target_language,
+            translated_edits=translated_edits,
+        )
 
     async def GetSettings(self, request, context):
         """Get application settings"""

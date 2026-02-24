@@ -8,10 +8,13 @@ import 'package:scribe_app/providers/settings_provider.dart';
 import 'package:scribe_app/providers/transcription_provider.dart';
 import 'package:scribe_app/screens/settings_screen.dart';
 import 'package:scribe_app/services/app_preferences.dart';
+import 'package:scribe_app/services/backend_process.dart';
 import 'package:scribe_app/theme.dart';
 
 void main() {
-  testWidgets('SettingsScreen renders without crashing', (WidgetTester tester) async {
+  testWidgets('SettingsScreen renders without crashing', (
+    WidgetTester tester,
+  ) async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     await tester.pumpWidget(
@@ -24,6 +27,7 @@ void main() {
               ChangeNotifierProvider(create: (_) => ConnectionProvider()),
               ChangeNotifierProvider(create: (_) => TranscriptionProvider()),
               ChangeNotifierProvider(create: (_) => SettingsProvider()),
+              ChangeNotifierProvider(create: (_) => BackendProcessManager()),
             ],
             child: const SettingsScreen(),
           ),
