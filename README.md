@@ -1,228 +1,138 @@
-# Scribe - Audio Transcription
+# Scribe
 
-A cross-platform desktop application for high-performance, offline audio transcription.
+Scribe is a local-first desktop transcription app for offline audio/video transcription with editable transcripts and export-ready output formats.
 
-## 🏗️ Architecture
+## Screenshots
 
-```
-┌─────────────────┐          ┌─────────────────┐
-│  Flutter UI     │  <gRPC>  │  Python Engine  │
-│  (Frontend)     │◄────────►│  (Backend)      │
-└─────────────────┘          └─────────────────┘
-        │                            │
-        ▼                            ▼
-  Local SQLite DB              Whisper Models
-```
+![Scribe brand mark](docs/images/scribe-brand-mark.png)
+![Transcription workspace](docs/images/transcription-workspace.png)
+![History screen](docs/images/history-screen.png)
+![Settings screen](docs/images/settings-screen.png)
 
-- **Frontend**: Flutter desktop application for the user interface
-- **Backend**: Python server with faster-whisper transcription engine
-- **Communication**: gRPC for efficient, type-safe communication
-- **Storage**: SQLite for job management and settings
-- **Models**: Local Whisper model cache for offline operation
+## Features
 
-## 📋 Prerequisites
+- Batch transcription queue for processing multiple files in one run.
+- Live segment streaming with in-place transcript editing.
+- History management for opening, exporting, and deleting past jobs.
+- Export formats: TXT, SRT, VTT, JSON, CSV.
+- Local Whisper model management with download, delete, and storage visibility.
+- Compute type controls (`auto`, `int8`, `float16`, `float32`) for transcription defaults.
+- Local backend connectivity with managed backend mode or manual server mode.
 
-### macOS
-
-- Python 3.10+ with pip
-- FFmpeg (`brew install ffmpeg`)
-- Protocol Buffers compiler (`brew install protobuf`)
-- Dart protoc plugin (`dart pub global activate protoc_plugin`)
-- Flutter SDK 3.22+ with desktop support
-- Xcode Command Line Tools
-
-### Windows
-
-- Python 3.10+ with pip
-- FFmpeg (download from ffmpeg.org)
-- Protocol Buffers compiler (download from GitHub releases)
-- Dart protoc plugin (`dart pub global activate protoc_plugin`)
-- Flutter SDK 3.22+ with desktop support
-- Visual Studio 2022 with C++ desktop development
-
-### Linux
-
-- Python 3.10+ with pip
-- FFmpeg (`sudo apt install ffmpeg`)
-- Protocol Buffers compiler (`sudo apt install protobuf-compiler`)
-- Dart protoc plugin (`dart pub global activate protoc_plugin`)
-- Flutter SDK 3.22+ with desktop support
-- Build essentials (`sudo apt install build-essential`)
-
-## 🚀 Quick Start
-
-### 1. Clone the repository
+## Quick Start
 
 ```bash
 git clone https://github.com/munalgar/scribe.git
 cd scribe
 ```
 
-### 2. Set up the Python backend
+Terminal 1:
 
 ```bash
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r backend/requirements.txt
-
-# Generate gRPC code
-bash scripts/gen_proto.sh  # On Windows: powershell scripts/gen_proto.ps1
+bash scripts/dev_backend.sh
 ```
 
-### 3. Set up the Flutter frontend
+Terminal 2:
 
 ```bash
-# Navigate to Flutter app
-cd frontend/flutter/scribe_app
-
-# Get dependencies
-flutter pub get
+bash scripts/dev_frontend.sh macos
 ```
 
-### 4. Run the application
+For other desktop targets, replace `macos` with `windows` or `linux`.
+In external/manual mode, the default backend endpoint is `127.0.0.1:50051`.
+In managed mode, the app auto-selects a free localhost port at startup.
+Managed mode is the recommended default for end users; external mode is mainly for developer and advanced custom server workflows.
 
-**Terminal 1 - Start the backend:**
+## Prerequisites
+
+- macOS: Python 3.10+, Flutter with desktop support, FFmpeg (`brew install ffmpeg`), Protocol Buffers compiler (`brew install protobuf`), Dart protoc plugin (`dart pub global activate protoc_plugin`), Xcode Command Line Tools.
+- Windows: Python 3.10+, Flutter with desktop support, FFmpeg, Protocol Buffers compiler, Dart protoc plugin (`dart pub global activate protoc_plugin`), Visual Studio 2022 with C++ desktop tools.
+- Linux: Python 3.10+, Flutter with desktop support, FFmpeg (`sudo apt install ffmpeg`), Protocol Buffers compiler (`sudo apt install protobuf-compiler`), Dart protoc plugin (`dart pub global activate protoc_plugin`), build tools (`sudo apt install build-essential`).
+
+## Model Management
+
+Whisper models are stored locally under `shared/models/` by default and can be managed from Settings.
+
+- `tiny` / `tiny.en` (~39 MB): fastest, lower accuracy.
+- `base` / `base.en` (~74 MB): balanced default.
+- `small` / `small.en` (~244 MB): better accuracy.
+- `medium` / `medium.en` (~769 MB): high accuracy.
+- `large-v1` / `large-v2` / `large-v3` / `large` (~1.5 GB): highest accuracy, largest footprint.
+
+Models are downloaded on demand, then reused offline for future runs.
+
+## GPU Acceleration
+
+Scribe detects available hardware and picks an appropriate inference profile.
+
+- NVIDIA GPUs: uses CUDA with `float16` when available.
+- Apple Silicon: uses CPU path with `int8` default for fast local inference.
+- AMD/DirectML environments: detected for tuning, with CPU execution fallback in current backend path.
+- CPU-only systems: runs with `int8` by default.
+
+You can override compute type in Settings per your speed/accuracy preference.
+
+## How It Works
+
+1. Select one or more audio/video files in the transcription view.
+2. Run transcription, review live output, and edit segments inline.
+3. Export results in the format your workflow needs.
+
+## Development
+
+Generate gRPC bindings:
 
 ```bash
-bash scripts/dev_backend.sh  # On Windows: powershell scripts/dev_backend.ps1
+bash scripts/gen_proto.sh
 ```
 
-**Terminal 2 - Start the frontend:**
+Build backend executable:
 
 ```bash
-bash scripts/dev_frontend.sh macos  # Or: windows, linux
+bash scripts/build_backend.sh
 ```
 
-## 🎙️ Usage
-
-1. **Start the backend server** - This runs the transcription engine
-2. **Launch the Flutter app** - This provides the user interface
-3. **Connect** - Click the Connect button to establish connection with the backend
-4. **Select audio file** - Choose an audio file to transcribe
-5. **View results** - See real-time transcription progress and results
-
-## 🚀 GPU Acceleration
-
-### NVIDIA GPUs (CUDA)
-
-- Install CUDA Toolkit 11.8 or 12.x
-- Install cuDNN 8.x
-- The backend will automatically detect and use CUDA
-
-### Apple Silicon (Metal)
-
-- Works automatically on M1/M2/M3 Macs
-- No additional setup required
-
-### AMD GPUs (ROCm)
-
-- Linux only: Install ROCm toolkit
-- Set environment variable: `export HSA_OVERRIDE_GFX_VERSION=10.3.0`
-
-### Windows (DirectML)
-
-- Supports AMD, Intel, and NVIDIA GPUs
-- Install DirectML runtime (comes with Windows 10 1903+)
-
-## 📦 Model Management
-
-Whisper models are downloaded automatically on first use:
-
-- **tiny** (~39 MB) - Fastest, lower accuracy
-- **base** (~74 MB) - Good balance
-- **small** (~244 MB) - Better accuracy
-- **medium** (~769 MB) - High accuracy
-- **large-v3** (~1.5 GB) - Best accuracy
-
-Models are cached in `shared/models/` for offline use.
-
-## 🏗️ Building for Distribution
-
-### Backend (Python to executable)
+Build a desktop release bundle for the current host OS (includes backend + frontend):
 
 ```bash
-bash scripts/build_backend_nuitka.sh
+python3 scripts/package_release.py
 ```
 
-### Frontend (Flutter)
+Create GitHub release downloads for Windows/macOS/Linux:
 
-```bash
-cd frontend/flutter/scribe_app
-
-# macOS
-flutter build macos
-
-# Windows
-flutter build windows
-
-# Linux
-flutter build linux
-```
-
-## 🔧 Troubleshooting
-
-### Backend won't start
-
-- Check Python version: `python3 --version` (needs 3.10+)
-- Verify virtual environment is activated
-- Check port 50051 is not in use
-
-### Frontend connection issues
-
-- Ensure backend is running first
-- Check firewall isn't blocking localhost:50051
-- Verify gRPC code generation completed successfully
-
-### GPU not detected
-
-- Check CUDA installation: `nvidia-smi`
-- Verify PyTorch CUDA support: `python -c "import torch; print(torch.cuda.is_available())"`
-- Try CPU mode by setting compute_type to "int8"
-
-### Model download fails
-
-- Check disk space (need 2-3 GB free)
-- Verify internet connection for initial download
-- Try smaller model first (tiny or base)
+1. Push a version tag (for example: `git tag v1.0.0 && git push origin v1.0.0`).
+2. GitHub Actions runs `.github/workflows/release.yml`.
+3. The workflow publishes release assets:
+   - `scribe-windows-<tag>.zip`
+   - `scribe-macos-<tag>.zip`
+   - `scribe-linux-<tag>.zip`
 
 ## Testing
 
-### Backend Tests
-
-Basic sanity checks for backend components:
+Backend sanity checks:
 
 ```bash
 python3 tests/test_backend.py
 python3 tests/test_server.py
 ```
 
-### Frontend Tests
-
-Run Flutter widget tests:
+Frontend tests:
 
 ```bash
 cd frontend/flutter/scribe_app
 flutter test
 ```
 
-## Contributing
+## Project Structure
 
-We welcome contributions! Please see CONTRIBUTING.md for guidelines.
+```text
+backend/                     # Python gRPC backend and transcription engine
+frontend/flutter/scribe_app/ # Flutter desktop client
+proto/                       # Shared gRPC/protobuf contract
+scripts/                     # Dev and build scripts
+shared/models/               # Local Whisper model cache
+```
 
-## 📄 License
+## License
 
-This project is licensed under the MIT License - see LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- [OpenAI Whisper](https://github.com/openai/whisper) for the transcription models
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) for optimized inference
-- [Flutter](https://flutter.dev) for cross-platform UI
-- [gRPC](https://grpc.io) for efficient communication
-
----
-
-Built with ❤️ for privacy and performance
+Licensed under the MIT License. See [LICENSE](LICENSE).

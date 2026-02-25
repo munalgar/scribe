@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -42,6 +43,7 @@ class TranscriptionResultView extends StatefulWidget {
 class _TranscriptionResultViewState extends State<TranscriptionResultView> {
   final GlobalKey<AudioPlayerBarState> _playerBarKey = GlobalKey();
   final GlobalKey<TranscriptPanelState> _transcriptKey = GlobalKey();
+  final FocusNode _shortcutFocusNode = FocusNode();
 
   Duration _playbackPosition = Duration.zero;
   bool _isPlaying = false;
@@ -51,6 +53,11 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleGlobalShortcutKeyEvent);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _shortcutFocusNode.requestFocus();
+    });
     _subs.add(
       widget.audioPlayer.stream.position.listen((p) {
         if (mounted) setState(() => _playbackPosition = p);
@@ -65,10 +72,27 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleGlobalShortcutKeyEvent);
+    _shortcutFocusNode.dispose();
     for (final s in _subs) {
       s.cancel();
     }
     super.dispose();
+  }
+
+  bool _handleGlobalShortcutKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.keyF) {
+      return false;
+    }
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return false;
+    final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
+    final modifierPressed = isMacOS
+        ? HardwareKeyboard.instance.isMetaPressed
+        : HardwareKeyboard.instance.isControlPressed;
+    if (!modifierPressed) return false;
+    _openTranscriptSearch();
+    return true;
   }
 
   void _handleSeek(Duration position) {
@@ -79,10 +103,36 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     _playerBarKey.currentState?.togglePlayPause();
   }
 
+  void _seekBackwardShortcut() {
+    _playerBarKey.currentState?.seekBackwardByStep();
+  }
+
+  void _seekForwardShortcut() {
+    _playerBarKey.currentState?.seekForwardByStep();
+  }
+
+  void _openTranscriptSearch() {
+    _transcriptKey.currentState?.openSearch();
+  }
+
+  void _goToPreviousTranscriptLine() {
+    _transcriptKey.currentState?.goToPreviousLine();
+  }
+
+  void _goToNextTranscriptLine() {
+    _transcriptKey.currentState?.goToNextLine();
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<TranscriptionProvider>();
     final theme = Theme.of(context);
+    final isMacOS = defaultTargetPlatform == TargetPlatform.macOS;
+    final searchShortcutActivator = SingleActivator(
+      LogicalKeyboardKey.keyF,
+      meta: isMacOS,
+      control: !isMacOS,
+    );
 
     final isDone = provider.isBatchMode
         ? provider.isBatchComplete
@@ -108,13 +158,20 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
 
     return CallbackShortcuts(
       bindings: {
-        const SingleActivator(LogicalKeyboardKey.space): _handleSpaceKey,
-        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): () =>
-            _playerBarKey.currentState?.seekBackwardByStep(),
-        const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): () =>
-            _playerBarKey.currentState?.seekForwardByStep(),
+        const SingleActivator(LogicalKeyboardKey.space, shift: true):
+            _handleSpaceKey,
+        searchShortcutActivator: _openTranscriptSearch,
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
+            _seekBackwardShortcut,
+        const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true):
+            _seekForwardShortcut,
+        const SingleActivator(LogicalKeyboardKey.arrowUp, alt: true):
+            _goToPreviousTranscriptLine,
+        const SingleActivator(LogicalKeyboardKey.arrowDown, alt: true):
+            _goToNextTranscriptLine,
       },
       child: Focus(
+        focusNode: _shortcutFocusNode,
         autofocus: true,
         child: Column(
           children: [
@@ -345,6 +402,10 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
     BatchItem? viewingItem,
     int viewIndex,
   ) {
+    final isMacOS = theme.platform == TargetPlatform.macOS;
+    final searchShortcutLabel = isMacOS ? 'Cmd + F' : 'Ctrl + F';
+    final altLabel = isMacOS ? 'Option' : 'Alt';
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       curve: Curves.easeOutCubic,
@@ -556,13 +617,26 @@ class _TranscriptionResultViewState extends State<TranscriptionResultView> {
                           ],
                         ),
                         const SizedBox(height: 8),
-                        _buildShortcutHint('Space', 'Play / Pause', theme),
                         _buildShortcutHint(
-                          'Alt + ← →',
+                          'Shift + Space',
+                          'Play / Pause',
+                          theme,
+                        ),
+                        _buildShortcutHint(
+                          '$altLabel + ←/→',
                           'Skip by selected step',
                           theme,
                         ),
-                        _buildShortcutHint('Ctrl + F', 'Search', theme),
+                        _buildShortcutHint(
+                          '$altLabel + ↓/↑',
+                          'Next / previous line',
+                          theme,
+                        ),
+                        _buildShortcutHint(
+                          searchShortcutLabel,
+                          'Search',
+                          theme,
+                        ),
                         _buildShortcutHint('Double-click', 'Edit text', theme),
                       ],
                     ),
