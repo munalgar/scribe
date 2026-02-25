@@ -108,6 +108,25 @@ def run_flutter(args: list[str], cwd: Path) -> None:
     run([flutter, *args], cwd=cwd)
 
 
+def flutter_supports_option(
+    command_args: list[str], option_name: str, cwd: Path
+) -> bool:
+    flutter = resolve_flutter_executable()
+    if sys.platform.startswith("win"):
+        cmd = ["cmd", "/c", flutter, *command_args, "-h"]
+    else:
+        cmd = [flutter, *command_args, "-h"]
+    result = subprocess.run(
+        cmd,
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+    return option_name in output
+
+
 def release_python_path(venv_dir: Path, platform: str) -> Path:
     if platform == "windows":
         return venv_dir / "Scripts" / "python.exe"
@@ -274,7 +293,10 @@ def build_frontend(platform: str) -> None:
 
     cmd = ["build", platform, "--release"]
     if platform == "macos":
-        cmd.append("--no-codesign")
+        if flutter_supports_option(["build", "macos"], "--no-codesign", FRONTEND_APP_DIR):
+            cmd.append("--no-codesign")
+        else:
+            log("Flutter macOS build does not support --no-codesign; building without it.")
     run_flutter(cmd, cwd=FRONTEND_APP_DIR)
 
 
