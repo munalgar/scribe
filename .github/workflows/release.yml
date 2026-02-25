@@ -46,7 +46,30 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev protobuf-compiler
+
+      - name: Install macOS build dependencies
+        if: matrix.platform == 'macos'
+        run: |
+          brew install protobuf
+
+      - name: Install Windows build dependencies
+        if: matrix.platform == 'windows'
+        run: |
+          choco install protoc -y --no-progress
+
+      - name: Install Dart protoc plugin
+        run: dart pub global activate protoc_plugin
+
+      - name: Add Dart pub cache to PATH (Linux/macOS)
+        if: matrix.platform != 'windows'
+        run: echo "$HOME/.pub-cache/bin" >> "$GITHUB_PATH"
+
+      - name: Add Dart pub cache to PATH (Windows)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          "$env:LOCALAPPDATA\Pub\Cache\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Enable desktop target
         run: flutter config --enable-${{ matrix.platform }}-desktop

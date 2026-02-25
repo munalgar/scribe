@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 from pathlib import Path
+from shutil import which
 from zipfile import ZIP_DEFLATED, ZipFile
 
 
@@ -27,6 +28,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_DIR = PROJECT_ROOT / "backend"
 FRONTEND_APP_DIR = PROJECT_ROOT / "frontend" / "flutter" / "scribe_app"
 DIST_DIR = PROJECT_ROOT / "dist" / "release"
+PROTO_DIR = PROJECT_ROOT / "proto"
+PROTO_FILE = PROTO_DIR / "scribe.proto"
+PY_PROTO_OUT = BACKEND_DIR / "scribe_backend" / "proto"
+DART_PROTO_OUT = FRONTEND_APP_DIR / "lib" / "proto"
 
 
 class BuildError(RuntimeError):
@@ -167,6 +172,62 @@ def build_backend_binary(platform: str, python: Path) -> Path:
     return backend_exe
 
 
+def generate_proto_stubs(python: Path) -> None:
+    log("Generating gRPC stubs from proto/scribe.proto")
+
+    if not PROTO_FILE.exists():
+        raise BuildError(f"Proto file not found: {PROTO_FILE}")
+
+    protoc = which("protoc")
+    if not protoc:
+        raise BuildError(
+            "protoc was not found in PATH. Install Protocol Buffers compiler."
+        )
+
+    if not which("protoc-gen-dart"):
+        raise BuildError(
+            "protoc-gen-dart was not found in PATH. "
+            "Install with: dart pub global activate protoc_plugin"
+        )
+
+    PY_PROTO_OUT.mkdir(parents=True, exist_ok=True)
+    DART_PROTO_OUT.mkdir(parents=True, exist_ok=True)
+
+    run(
+        [
+            str(python),
+            "-m",
+            "grpc_tools.protoc",
+            "-I",
+            str(PROTO_DIR),
+            f"--python_out={PY_PROTO_OUT}",
+            f"--grpc_python_out={PY_PROTO_OUT}",
+            str(PROTO_FILE),
+        ]
+    )
+
+    # grpc_tools uses absolute-style import by default; convert to package-relative.
+    py_grpc = PY_PROTO_OUT / "scribe_pb2_grpc.py"
+    if not py_grpc.exists():
+        raise BuildError(f"Expected generated file not found: {py_grpc}")
+    py_grpc.write_text(
+        py_grpc.read_text().replace(
+            "import scribe_pb2 as scribe__pb2",
+            "from . import scribe_pb2 as scribe__pb2",
+        )
+    )
+
+    run(
+        [
+            protoc,
+            "-I",
+            str(PROTO_DIR),
+            f"--dart_out=grpc:{DART_PROTO_OUT}",
+            str(PROTO_FILE),
+        ]
+    )
+
+
 def build_frontend(platform: str) -> None:
     log(f"Building Flutter desktop app for {platform}")
     run(["flutter", "pub", "get"], cwd=FRONTEND_APP_DIR)
@@ -285,6 +346,7 @@ def package_release(platform: str, version: str) -> Path:
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     python = ensure_release_venv(platform)
+    generate_proto_stubs(python)
     backend_exe = build_backend_binary(platform, python)
     build_frontend(platform)
     macos_app_bundle = copy_frontend_bundle(platform, staging_dir)
