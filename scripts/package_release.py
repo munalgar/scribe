@@ -68,6 +68,46 @@ def sanitize_version(version: str) -> str:
     return result or "local"
 
 
+def resolve_flutter_executable() -> str:
+    candidates: list[str] = []
+
+    flutter_root = os.environ.get("FLUTTER_ROOT")
+    if flutter_root:
+        flutter_bin = Path(flutter_root) / "bin"
+        if sys.platform.startswith("win"):
+            candidates.extend(
+                [
+                    str(flutter_bin / "flutter.bat"),
+                    str(flutter_bin / "flutter.cmd"),
+                    str(flutter_bin / "flutter.exe"),
+                ]
+            )
+        else:
+            candidates.append(str(flutter_bin / "flutter"))
+
+    for name in ("flutter", "flutter.bat", "flutter.cmd", "flutter.exe"):
+        resolved = which(name)
+        if resolved:
+            candidates.append(resolved)
+
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+
+    raise BuildError(
+        "Flutter executable not found. Ensure flutter is on PATH or FLUTTER_ROOT is set."
+    )
+
+
+def run_flutter(args: list[str], cwd: Path) -> None:
+    flutter = resolve_flutter_executable()
+    if sys.platform.startswith("win"):
+        # On Windows, flutter is usually a .bat/.cmd script.
+        run(["cmd", "/c", flutter, *args], cwd=cwd)
+        return
+    run([flutter, *args], cwd=cwd)
+
+
 def release_python_path(venv_dir: Path, platform: str) -> Path:
     if platform == "windows":
         return venv_dir / "Scripts" / "python.exe"
@@ -230,12 +270,12 @@ def generate_proto_stubs(python: Path) -> None:
 
 def build_frontend(platform: str) -> None:
     log(f"Building Flutter desktop app for {platform}")
-    run(["flutter", "pub", "get"], cwd=FRONTEND_APP_DIR)
+    run_flutter(["pub", "get"], cwd=FRONTEND_APP_DIR)
 
-    cmd = ["flutter", "build", platform, "--release"]
+    cmd = ["build", platform, "--release"]
     if platform == "macos":
         cmd.append("--no-codesign")
-    run(cmd, cwd=FRONTEND_APP_DIR)
+    run_flutter(cmd, cwd=FRONTEND_APP_DIR)
 
 
 def frontend_output_dir(platform: str) -> Path:
