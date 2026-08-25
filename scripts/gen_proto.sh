@@ -2,13 +2,33 @@
 set -euo pipefail
 
 DRY_CHECK=false
+GENERATE_PYTHON=true
+GENERATE_DART=true
+GENERATION_MODE="both"
 for arg in "$@"; do
-    if [ "$arg" = "--dry-check" ]; then
-        DRY_CHECK=true
-    else
-        echo "Error: unexpected arguments: $*" >&2
-        exit 1
-    fi
+    case "$arg" in
+        --dry-check) DRY_CHECK=true ;;
+        --python-only)
+            if [ "$GENERATION_MODE" = "dart" ]; then
+                echo "Error: --python-only and --dart-only cannot be used together." >&2
+                exit 1
+            fi
+            GENERATION_MODE="python"
+            GENERATE_DART=false
+            ;;
+        --dart-only)
+            if [ "$GENERATION_MODE" = "python" ]; then
+                echo "Error: --python-only and --dart-only cannot be used together." >&2
+                exit 1
+            fi
+            GENERATION_MODE="dart"
+            GENERATE_PYTHON=false
+            ;;
+        *)
+            echo "Error: unexpected arguments: $*" >&2
+            exit 1
+            ;;
+    esac
 done
 
 dry_echo() {
@@ -22,54 +42,62 @@ PY_OUT="$ROOT/backend/scribe_backend/proto"
 DART_OUT="$ROOT/frontend/flutter/scribe_app/lib/proto"
 PROTO_FILE="$PROTO_DIR/scribe.proto"
 
-if [ -x "$ROOT/.venv/bin/python" ]; then
-    PYTHON_BIN="$ROOT/.venv/bin/python"
-elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
-    PYTHON_BIN="$ROOT/.venv/Scripts/python.exe"
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-    PYTHON_BIN="python"
-else
-    echo "Error: no suitable Python interpreter found (expected python3/python)." >&2
-    exit 1
-fi
-
 if [ ! -f "$PROTO_FILE" ]; then
     echo "Error: proto file not found at $PROTO_FILE" >&2
     exit 1
 fi
 
-# Check required tools
-if ! "$PYTHON_BIN" -c "import grpc_tools" < /dev/null 2>/dev/null; then
-    echo "Error: grpc_tools not found. Install with: pip install grpcio-tools" >&2
-    exit 1
+if [ "$GENERATE_PYTHON" = true ]; then
+    if [ -x "$ROOT/.venv/bin/python" ]; then
+        PYTHON_BIN="$ROOT/.venv/bin/python"
+    elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+        PYTHON_BIN="$ROOT/.venv/Scripts/python.exe"
+    elif command -v python3 >/dev/null 2>&1; then
+        PYTHON_BIN="python3"
+    elif command -v python >/dev/null 2>&1; then
+        PYTHON_BIN="python"
+    else
+        echo "Error: no suitable Python interpreter found (expected python3/python)." >&2
+        exit 1
+    fi
+
+    if ! "$PYTHON_BIN" -c "import grpc_tools" < /dev/null 2>/dev/null; then
+        echo "Error: grpc_tools not found. Install with: pip install grpcio-tools" >&2
+        exit 1
+    fi
 fi
 
-if command -v protoc >/dev/null 2>&1; then
-    PROTOC_BIN="protoc"
-elif command -v protoc.exe >/dev/null 2>&1; then
-    PROTOC_BIN="protoc.exe"
-else
-    echo "Error: protoc not found. Install Protocol Buffers compiler." >&2
-    exit 1
-fi
+if [ "$GENERATE_DART" = true ]; then
+    if command -v protoc >/dev/null 2>&1; then
+        PROTOC_BIN="protoc"
+    elif command -v protoc.exe >/dev/null 2>&1; then
+        PROTOC_BIN="protoc.exe"
+    else
+        echo "Error: protoc not found. Install the Protocol Buffers compiler." >&2
+        exit 1
+    fi
 
-# Check for protoc-gen-dart (Dart protoc plugin)
-# Required minimum version to generate code compatible with protobuf ^6.0.0
-MIN_DART_PLUGIN_VERSION=21
-if [ -d "$HOME/.pub-cache/bin" ]; then
-    export PATH="$HOME/.pub-cache/bin:$PATH"
-fi
-if ! command -v protoc-gen-dart >/dev/null 2>&1; then
-    echo "protoc-gen-dart not found. Installing protoc_plugin..."
-    dart pub global activate protoc_plugin
-elif DART_PLUGIN_VERSION=$(dart pub global list 2>/dev/null | grep protoc_plugin | sed 's/protoc_plugin //'); then
-    DART_PLUGIN_MAJOR=$(echo "$DART_PLUGIN_VERSION" | cut -d. -f1)
-    if [ "$DART_PLUGIN_MAJOR" -lt "$MIN_DART_PLUGIN_VERSION" ] 2>/dev/null; then
-        echo "protoc_plugin $DART_PLUGIN_VERSION is too old (need >=$MIN_DART_PLUGIN_VERSION.0.0 for protobuf ^6.0.0)."
-        echo "Updating protoc_plugin..."
+    if ! command -v dart >/dev/null 2>&1; then
+        echo "Error: dart command not found. Install Flutter and add its bin directory to PATH." >&2
+        echo "See: https://docs.flutter.dev/install/add-to-path" >&2
+        exit 1
+    fi
+
+    # Required minimum version to generate code compatible with protobuf ^6.0.0.
+    MIN_DART_PLUGIN_VERSION=21
+    if [ -d "$HOME/.pub-cache/bin" ]; then
+        export PATH="$HOME/.pub-cache/bin:$PATH"
+    fi
+    if ! command -v protoc-gen-dart >/dev/null 2>&1; then
+        echo "protoc-gen-dart not found. Installing protoc_plugin..."
         dart pub global activate protoc_plugin
+    elif DART_PLUGIN_VERSION=$(dart pub global list 2>/dev/null | grep protoc_plugin | sed 's/protoc_plugin //'); then
+        DART_PLUGIN_MAJOR=$(echo "$DART_PLUGIN_VERSION" | cut -d. -f1)
+        if [ "$DART_PLUGIN_MAJOR" -lt "$MIN_DART_PLUGIN_VERSION" ] 2>/dev/null; then
+            echo "protoc_plugin $DART_PLUGIN_VERSION is too old (need >=$MIN_DART_PLUGIN_VERSION.0.0 for protobuf ^6.0.0)."
+            echo "Updating protoc_plugin..."
+            dart pub global activate protoc_plugin
+        fi
     fi
 fi
 
@@ -79,43 +107,58 @@ if [ "$DRY_CHECK" = true ]; then
 fi
 
 # Create output directories if they don't exist
-if [ "$DRY_CHECK" = true ]; then
-    dry_echo "Would ensure output directories exist: $PY_OUT, $DART_OUT"
-else
-    mkdir -p "$PY_OUT" "$DART_OUT"
+if [ "$GENERATE_PYTHON" = true ]; then
+    if [ "$DRY_CHECK" = true ]; then
+        dry_echo "Would ensure output directory exists: $PY_OUT"
+    else
+        mkdir -p "$PY_OUT"
+    fi
+fi
+if [ "$GENERATE_DART" = true ]; then
+    if [ "$DRY_CHECK" = true ]; then
+        dry_echo "Would ensure output directory exists: $DART_OUT"
+    else
+        mkdir -p "$DART_OUT"
+    fi
 fi
 
 # Generate Python code
-echo "Generating Python gRPC code..."
-if [ "$DRY_CHECK" = true ]; then
-    dry_echo "Would run: $PYTHON_BIN -m grpc_tools.protoc -I $PROTO_DIR --python_out=$PY_OUT --grpc_python_out=$PY_OUT $PROTO_FILE"
-else
-    "$PYTHON_BIN" -m grpc_tools.protoc \
-        -I "$PROTO_DIR" \
-        --python_out="$PY_OUT" \
-        --grpc_python_out="$PY_OUT" \
-        "$PROTO_FILE"
+if [ "$GENERATE_PYTHON" = true ]; then
+    echo "Generating Python gRPC code..."
+    if [ "$DRY_CHECK" = true ]; then
+        dry_echo "Would run: $PYTHON_BIN -m grpc_tools.protoc -I $PROTO_DIR --python_out=$PY_OUT --grpc_python_out=$PY_OUT $PROTO_FILE"
+    else
+        "$PYTHON_BIN" -m grpc_tools.protoc \
+            -I "$PROTO_DIR" \
+            --python_out="$PY_OUT" \
+            --grpc_python_out="$PY_OUT" \
+            "$PROTO_FILE"
+    fi
 fi
 
 # Fix absolute imports in generated grpc file to relative imports
 # (grpc_tools generates 'import scribe_pb2' but we need 'from . import scribe_pb2')
-if [ "$DRY_CHECK" = true ]; then
-    dry_echo "Would patch Python import style in $PY_OUT/scribe_pb2_grpc.py"
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' 's/^import scribe_pb2/from . import scribe_pb2/' "$PY_OUT/scribe_pb2_grpc.py"
-else
-    sed -i 's/^import scribe_pb2/from . import scribe_pb2/' "$PY_OUT/scribe_pb2_grpc.py"
+if [ "$GENERATE_PYTHON" = true ]; then
+    if [ "$DRY_CHECK" = true ]; then
+        dry_echo "Would patch Python import style in $PY_OUT/scribe_pb2_grpc.py"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        sed -i '' 's/^import scribe_pb2/from . import scribe_pb2/' "$PY_OUT/scribe_pb2_grpc.py"
+    else
+        sed -i 's/^import scribe_pb2/from . import scribe_pb2/' "$PY_OUT/scribe_pb2_grpc.py"
+    fi
 fi
 
 # Generate Dart code
-echo "Generating Dart gRPC code..."
-if [ "$DRY_CHECK" = true ]; then
-    dry_echo "Would run: $PROTOC_BIN -I $PROTO_DIR --dart_out=grpc:$DART_OUT $PROTO_FILE"
-else
-    "$PROTOC_BIN" \
-        -I "$PROTO_DIR" \
-        --dart_out=grpc:"$DART_OUT" \
-        "$PROTO_FILE"
+if [ "$GENERATE_DART" = true ]; then
+    echo "Generating Dart gRPC code..."
+    if [ "$DRY_CHECK" = true ]; then
+        dry_echo "Would run: $PROTOC_BIN -I $PROTO_DIR --dart_out=grpc:$DART_OUT $PROTO_FILE"
+    else
+        "$PROTOC_BIN" \
+            -I "$PROTO_DIR" \
+            --dart_out=grpc:"$DART_OUT" \
+            "$PROTO_FILE"
+    fi
 fi
 
 echo "gRPC code generation complete!"

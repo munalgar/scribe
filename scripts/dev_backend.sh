@@ -95,13 +95,14 @@ else
     echo -e "${GREEN}Dependencies up to date${NC}"
 fi
 
-# Generate gRPC code if needed
-if [ ! -f "backend/scribe_backend/proto/scribe_pb2.py" ]; then
+# Generate Python gRPC code if needed. Backend startup does not require Dart.
+if [ ! -f "backend/scribe_backend/proto/scribe_pb2.py" ] || \
+   [ "proto/scribe.proto" -nt "backend/scribe_backend/proto/scribe_pb2.py" ]; then
     if [ "$DRY_CHECK" = true ]; then
-        dry_echo "Would generate gRPC code via scripts/gen_proto.sh"
+        dry_echo "Would generate Python gRPC code via scripts/gen_proto.sh --python-only"
     else
         echo -e "${YELLOW}Generating gRPC code...${NC}"
-        bash scripts/gen_proto.sh
+        bash scripts/gen_proto.sh --python-only
     fi
 fi
 
@@ -125,4 +126,4 @@ if [ "$DRY_CHECK" = true ]; then
 fi
 
 cd "$PROJECT_ROOT/backend"
-"$VENV_PYTHON" -m scribe_backend.server
+exec "$VENV_PYTHON" -m scribe_backend.server

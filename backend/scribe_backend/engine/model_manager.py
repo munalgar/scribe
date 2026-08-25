@@ -10,6 +10,8 @@ import huggingface_hub
 import requests
 from tqdm.auto import tqdm
 
+from ..utils.paths import default_models_dir
+
 logger = logging.getLogger(__name__)
 
 # Map short model names to HuggingFace repo IDs (mirrors faster_whisper.utils._MODELS)
@@ -86,9 +88,7 @@ class ModelManager:
         if models_dir:
             self.models_dir = Path(models_dir)
         else:
-            # Default to shared/models in project root
-            project_root = Path(__file__).parent.parent.parent.parent
-            self.models_dir = project_root / "shared" / "models"
+            self.models_dir = default_models_dir()
 
         # Create models directory if it doesn't exist
         self.models_dir.mkdir(parents=True, exist_ok=True)

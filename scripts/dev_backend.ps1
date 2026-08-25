@@ -9,6 +9,13 @@ function Write-DryCheck {
     Write-Host "[DRY-CHECK] $Message" -ForegroundColor Cyan
 }
 
+function Assert-LastExitCode {
+    param([string]$CommandName)
+    if ($LASTEXITCODE -ne 0) {
+        throw "$CommandName failed with exit code $LASTEXITCODE"
+    }
+}
+
 Write-Host "Starting Scribe Backend Development Server" -ForegroundColor Green
 if ($DryCheck) {
     Write-DryCheck "Dry-check mode enabled; no changes will be made."
@@ -42,6 +49,7 @@ function New-Venv {
             return
         }
         & py -3 -m venv $Path
+        Assert-LastExitCode "py -3 -m venv"
         return
     }
     if (Get-Command python3 -ErrorAction SilentlyContinue) {
@@ -50,6 +58,7 @@ function New-Venv {
             return
         }
         & python3 -m venv $Path
+        Assert-LastExitCode "python3 -m venv"
         return
     }
     if (Get-Command python -ErrorAction SilentlyContinue) {
@@ -58,6 +67,7 @@ function New-Venv {
             return
         }
         & python -m venv $Path
+        Assert-LastExitCode "python -m venv"
         return
     }
 
@@ -124,7 +134,9 @@ if ($shouldInstall) {
     } else {
         Write-Host "Installing Python dependencies..." -ForegroundColor Green
         & $venvPython -m pip install --quiet --upgrade pip wheel
+        Assert-LastExitCode "pip install --upgrade pip wheel"
         & $venvPython -m pip install --quiet -r $requirements
+        Assert-LastExitCode "pip install -r backend/requirements.txt"
         New-Item -ItemType File -Force -Path $marker | Out-Null
     }
 } else {
@@ -132,12 +144,17 @@ if ($shouldInstall) {
 }
 
 $protoOut = Join-Path $PROJECT_ROOT "backend/scribe_backend/proto/scribe_pb2.py"
-if (-not (Test-Path $protoOut)) {
+$protoSource = Join-Path $PROJECT_ROOT "proto/scribe.proto"
+$needsProto = -not (Test-Path $protoOut)
+if (-not $needsProto) {
+    $needsProto = (Get-Item $protoSource).LastWriteTime -gt (Get-Item $protoOut).LastWriteTime
+}
+if ($needsProto) {
     if ($DryCheck) {
-        Write-DryCheck "Would generate gRPC code via scripts/gen_proto.ps1"
+        Write-DryCheck "Would generate Python gRPC code via scripts/gen_proto.ps1 -PythonOnly"
     } else {
         Write-Host "Generating gRPC code..." -ForegroundColor Yellow
-        & (Join-Path $PROJECT_ROOT "scripts/gen_proto.ps1")
+        & (Join-Path $PROJECT_ROOT "scripts/gen_proto.ps1") -PythonOnly
     }
 }
 
@@ -160,3 +177,4 @@ if ($DryCheck) {
 
 Set-Location (Join-Path $PROJECT_ROOT "backend")
 & $venvPython -m scribe_backend.server
+Assert-LastExitCode "Scribe backend"

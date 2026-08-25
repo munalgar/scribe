@@ -8,10 +8,13 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 DRY_CHECK=false
+PREPARE_ONLY=false
 PLATFORM=""
 for arg in "$@"; do
     if [ "$arg" = "--dry-check" ]; then
         DRY_CHECK=true
+    elif [ "$arg" = "--prepare-only" ]; then
+        PREPARE_ONLY=true
     elif [ -z "$PLATFORM" ]; then
         PLATFORM="$arg"
     else
@@ -35,16 +38,31 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 FLUTTER_APP="$PROJECT_ROOT/frontend/flutter/scribe_app"
 
 # Add Flutter to PATH if standard locations exist
-if [ -d "$HOME/flutter/bin" ]; then
-    PATH="$HOME/flutter/bin:$PATH"
-fi
+for flutter_bin in \
+    "$HOME/flutter/bin" \
+    "$HOME/develop/flutter/bin" \
+    "$HOME/development/flutter/bin" \
+    "/opt/homebrew/share/flutter/bin" \
+    "/usr/local/share/flutter/bin"; do
+    if [ -d "$flutter_bin" ]; then
+        PATH="$flutter_bin:$PATH"
+    fi
+done
 if [ -d "$HOME/.pub-cache/bin" ]; then
     PATH="$HOME/.pub-cache/bin:$PATH"
 fi
 export PATH
 
 if ! command -v flutter >/dev/null 2>&1; then
-    echo "Error: flutter command not found. Add Flutter to PATH or install it first." >&2
+    echo "Error: Flutter SDK not found." >&2
+    echo "Install Flutter, add its bin directory to PATH, then run: flutter doctor" >&2
+    echo "Setup guide: https://docs.flutter.dev/install" >&2
+    exit 1
+fi
+
+if ! command -v dart >/dev/null 2>&1; then
+    echo "Error: dart command not found. Flutter is present, but its bundled Dart SDK is not on PATH." >&2
+    echo "See: https://docs.flutter.dev/install/add-to-path" >&2
     exit 1
 fi
 
@@ -60,6 +78,23 @@ if [ ! -d ".dart_tool" ] || [ ! -f "pubspec.lock" ] || [ "pubspec.yaml" -nt "pub
     fi
 else
     echo -e "${GREEN}Dependencies up to date${NC}"
+fi
+
+# Generate Dart gRPC code when missing or stale.
+PROTO_FILE="$PROJECT_ROOT/proto/scribe.proto"
+DART_PROTO_FILE="$FLUTTER_APP/lib/proto/scribe.pb.dart"
+if [ ! -f "$DART_PROTO_FILE" ] || [ "$PROTO_FILE" -nt "$DART_PROTO_FILE" ]; then
+    if [ "$DRY_CHECK" = true ]; then
+        dry_echo "Would generate Dart gRPC code via scripts/gen_proto.sh --dart-only"
+    else
+        echo -e "${YELLOW}Generating Dart gRPC code...${NC}"
+        bash "$PROJECT_ROOT/scripts/gen_proto.sh" --dart-only
+    fi
+fi
+
+if [ "$PREPARE_ONLY" = true ]; then
+    echo -e "${GREEN}Frontend development environment ready${NC}"
+    exit 0
 fi
 
 # Determine platform

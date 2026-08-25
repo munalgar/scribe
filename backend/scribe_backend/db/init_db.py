@@ -1,27 +1,19 @@
 """Database initialization module"""
 
-import os
 import sqlite3
 from pathlib import Path
 import logging
+
+from ..utils.paths import default_database_path
 
 logger = logging.getLogger(__name__)
 
 
 def get_db_path() -> Path:
     """Get the database file path"""
-    # Check for environment variable first
-    db_path = os.environ.get('SCRIBE_DB_PATH')
-    
-    if db_path:
-        return Path(db_path)
-    
-    # Default to backend/data directory
-    backend_dir = Path(__file__).parent.parent.parent
-    data_dir = backend_dir / 'data'
-    data_dir.mkdir(exist_ok=True)
-    
-    return data_dir / 'scribe.db'
+    db_path = default_database_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return db_path
 
 
 def init_database():
