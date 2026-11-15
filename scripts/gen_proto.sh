@@ -84,19 +84,22 @@ if [ "$GENERATE_DART" = true ]; then
     fi
 
     # Required minimum version to generate code compatible with protobuf ^6.0.0.
+    # protoc_plugin majors 21-25 generate code compatible with protobuf ^6.0.0.
     MIN_DART_PLUGIN_VERSION=21
+    MAX_DART_PLUGIN_VERSION=25
+    PINNED_DART_PLUGIN_VERSION=25.0.0
     if [ -d "$HOME/.pub-cache/bin" ]; then
         export PATH="$HOME/.pub-cache/bin:$PATH"
     fi
     if ! command -v protoc-gen-dart >/dev/null 2>&1; then
-        echo "protoc-gen-dart not found. Installing protoc_plugin..."
-        dart pub global activate protoc_plugin
+        echo "protoc-gen-dart not found. Installing protoc_plugin $PINNED_DART_PLUGIN_VERSION..."
+        dart pub global activate protoc_plugin "$PINNED_DART_PLUGIN_VERSION"
     elif DART_PLUGIN_VERSION=$(dart pub global list 2>/dev/null | grep protoc_plugin | sed 's/protoc_plugin //'); then
         DART_PLUGIN_MAJOR=$(echo "$DART_PLUGIN_VERSION" | cut -d. -f1)
-        if [ "$DART_PLUGIN_MAJOR" -lt "$MIN_DART_PLUGIN_VERSION" ] 2>/dev/null; then
-            echo "protoc_plugin $DART_PLUGIN_VERSION is too old (need >=$MIN_DART_PLUGIN_VERSION.0.0 for protobuf ^6.0.0)."
-            echo "Updating protoc_plugin..."
-            dart pub global activate protoc_plugin
+        if [ "$DART_PLUGIN_MAJOR" -lt "$MIN_DART_PLUGIN_VERSION" ] 2>/dev/null || [ "$DART_PLUGIN_MAJOR" -gt "$MAX_DART_PLUGIN_VERSION" ] 2>/dev/null; then
+            echo "protoc_plugin $DART_PLUGIN_VERSION is not compatible with protobuf ^6.0.0 (need $MIN_DART_PLUGIN_VERSION.x-$MAX_DART_PLUGIN_VERSION.x)."
+            echo "Installing protoc_plugin $PINNED_DART_PLUGIN_VERSION..."
+            dart pub global activate protoc_plugin "$PINNED_DART_PLUGIN_VERSION"
         fi
     fi
 fi

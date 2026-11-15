@@ -247,7 +247,7 @@ def generate_proto_stubs(python: Path) -> None:
     if not which("protoc-gen-dart"):
         raise BuildError(
             "protoc-gen-dart was not found in PATH. "
-            "Install with: dart pub global activate protoc_plugin"
+            "Install with: dart pub global activate protoc_plugin 25.0.0"
         )
 
     PY_PROTO_OUT.mkdir(parents=True, exist_ok=True)

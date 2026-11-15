@@ -91,7 +91,10 @@ if ($GenerateDart) {
     }
 
     # Required minimum version to generate code compatible with protobuf ^6.0.0.
+    # protoc_plugin majors 21-25 generate code compatible with protobuf ^6.0.0.
     $MinDartPluginVersion = 21
+    $MaxDartPluginVersion = 25
+    $PinnedDartPluginVersion = "25.0.0"
     $homeDir = if ($env:USERPROFILE) {
         $env:USERPROFILE
     } elseif ($env:HOME) {
@@ -106,15 +109,15 @@ if ($GenerateDart) {
     }
     $dartPluginInstalled = Get-Command protoc-gen-dart -ErrorAction SilentlyContinue
     if (-not $dartPluginInstalled) {
-        Write-Host "protoc-gen-dart not found. Installing protoc_plugin..."
-        dart pub global activate protoc_plugin
+        Write-Host "protoc-gen-dart not found. Installing protoc_plugin $PinnedDartPluginVersion..."
+        dart pub global activate protoc_plugin $PinnedDartPluginVersion
     } else {
         $dartPluginList = dart pub global list 2>$null | Select-String 'protoc_plugin'
         if ($dartPluginList -match 'protoc_plugin (\d+)') {
             $dartPluginMajor = [int]$Matches[1]
-            if ($dartPluginMajor -lt $MinDartPluginVersion) {
-                Write-Host "protoc_plugin is too old (need >=$MinDartPluginVersion.0.0 for protobuf ^6.0.0). Updating..."
-                dart pub global activate protoc_plugin
+            if ($dartPluginMajor -lt $MinDartPluginVersion -or $dartPluginMajor -gt $MaxDartPluginVersion) {
+                Write-Host "protoc_plugin $dartPluginMajor.x is not compatible with protobuf ^6.0.0 (need $MinDartPluginVersion.x-$MaxDartPluginVersion.x). Installing $PinnedDartPluginVersion..."
+                dart pub global activate protoc_plugin $PinnedDartPluginVersion
             }
         }
     }

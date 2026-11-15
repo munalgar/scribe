@@ -40,6 +40,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.35.3
           cache: true
 
       - name: Install Linux build dependencies
@@ -59,7 +60,7 @@ jobs:
           choco install protoc -y --no-progress
 
       - name: Install Dart protoc plugin
-        run: dart pub global activate protoc_plugin
+        run: dart pub global activate protoc_plugin 25.0.0
 
       - name: Add Dart pub cache to PATH (Linux/macOS)
         if: matrix.platform != 'windows'
