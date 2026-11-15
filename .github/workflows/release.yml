@@ -23,7 +23,7 @@ jobs:
           - os: windows-2022
             platform: windows
             artifact_glob: dist/release/scribe-windows-*.zip
-          - os: macos-14
+          - os: macos-15
             platform: macos
             artifact_glob: dist/release/scribe-macos-*.zip
 
