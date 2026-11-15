@@ -2,6 +2,7 @@
 
 # Scribe
 
+[![CI](https://github.com/munalgar/scribe/actions/workflows/ci.yml/badge.svg)](https://github.com/munalgar/scribe/actions/workflows/ci.yml)
 [![Desktop](https://img.shields.io/badge/Desktop-macOS%20%7C%20Windows%20%7C%20Linux-0f172a)](#download)
 [![Backend](https://img.shields.io/badge/Backend-Python%20gRPC-1d4ed8)](#development)
 [![Models](https://img.shields.io/badge/Whisper-Local%20Model%20Management-0f766e)](#model-management)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -287,11 +288,20 @@ def generate_proto_stubs(python: Path) -> None:
     )
 
 
-def build_frontend(platform: str) -> None:
+def release_semver(version: str) -> str | None:
+    """Return the X.Y.Z part of a release label such as ``v1.2.0``, if any."""
+    match = re.fullmatch(r"v?(\d+\.\d+\.\d+)", version)
+    return match.group(1) if match else None
+
+
+def build_frontend(platform: str, version: str) -> None:
     log(f"Building Flutter desktop app for {platform}")
     run_flutter(["pub", "get"], cwd=FRONTEND_APP_DIR)
 
     cmd = ["build", platform, "--release"]
+    semver = release_semver(version)
+    if semver:
+        cmd.extend([f"--build-name={semver}", f"--dart-define=SCRIBE_VERSION={semver}"])
     if platform == "macos":
         if flutter_supports_option(["build", "macos"], "--no-codesign", FRONTEND_APP_DIR):
             cmd.append("--no-codesign")
@@ -410,7 +420,7 @@ def package_release(platform: str, version: str) -> Path:
     python = ensure_release_venv(platform)
     generate_proto_stubs(python)
     backend_exe = build_backend_binary(platform, python)
-    build_frontend(platform)
+    build_frontend(platform, version)
     macos_app_bundle = copy_frontend_bundle(platform, staging_dir)
     place_backend_binary(platform, staging_dir, backend_exe, macos_app_bundle)
     create_archive(platform, staging_dir, archive_path)

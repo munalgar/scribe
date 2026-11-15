@@ -205,3 +205,4 @@ node_modules/
 
 # Exceptions - files that should be committed
 !proto/scribe.proto
+backend/build_pyinstaller/

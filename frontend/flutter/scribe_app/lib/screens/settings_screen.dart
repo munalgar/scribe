@@ -10,7 +10,10 @@ import '../services/app_preferences.dart';
 import '../services/backend_process.dart';
 import '../theme.dart';
 
-const _appVersion = '1.0.0';
+const _appVersion = String.fromEnvironment(
+  'SCRIBE_VERSION',
+  defaultValue: '1.1.0',
+);
 
 class _LangOption {
   final String code;
@@ -588,7 +591,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = context.watch<AppPreferences>();
     final process = context.watch<BackendProcessManager>();
     final isManaged = prefs.backendMode == BackendMode.managed;
-    final isConnected = conn.state == BackendConnectionState.connected;
     final isDev = prefs.devMode;
 
     final (Color statusColor, String statusLabel) = switch (conn.state) {
