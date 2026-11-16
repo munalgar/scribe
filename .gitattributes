@@ -28,3 +28,4 @@
 *.pth binary
 *.onnx binary
 *.bin binary
+*.ogg binary

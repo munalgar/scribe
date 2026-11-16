@@ -181,12 +181,19 @@ Run backend tests:
 .venv/bin/python tests/test_server.py
 ```
 
+Run the end-to-end transcription test (downloads the ~75 MB `tiny.en` model into `shared/models/` on first run):
+
+```bash
+.venv/bin/python tests/test_e2e_transcription.py
+```
+
 On Windows PowerShell:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_paths
 .\.venv\Scripts\python.exe tests/test_backend.py
 .\.venv\Scripts\python.exe tests/test_server.py
+.\.venv\Scripts\python.exe tests/test_e2e_transcription.py
 ```
 
 Run frontend tests:

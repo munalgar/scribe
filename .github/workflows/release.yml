@@ -78,6 +78,21 @@ jobs:
       - name: Build release package
         run: python scripts/package_release.py --platform ${{ matrix.platform }} --version ${{ github.ref_name }}
 
+      - name: Cache Whisper test model
+        uses: actions/cache@v4
+        with:
+          path: shared/models/tiny.en
+          key: whisper-tiny.en-v1
+
+      - name: End-to-end test against packaged backend
+        shell: bash
+        run: |
+          backend=$(find dist/release -type f \( -name scribe_backend -o -name scribe_backend.exe \) -path "*/scribe_backend/*" | head -n 1)
+          if [ -z "$backend" ]; then echo "Packaged backend not found" >&2; exit 1; fi
+          echo "Testing $backend"
+          if [ -x .venv-release/Scripts/python.exe ]; then py=.venv-release/Scripts/python.exe; else py=.venv-release/bin/python; fi
+          SCRIBE_E2E_BACKEND="$backend" "$py" tests/test_e2e_transcription.py
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

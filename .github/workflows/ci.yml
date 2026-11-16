@@ -43,6 +43,15 @@ jobs:
           .venv/bin/python tests/test_backend.py
           .venv/bin/python tests/test_server.py
 
+      - name: Cache Whisper test model
+        uses: actions/cache@v4
+        with:
+          path: shared/models/tiny.en
+          key: whisper-tiny.en-v1
+
+      - name: End-to-end transcription test
+        run: .venv/bin/python tests/test_e2e_transcription.py
+
   frontend:
     name: Frontend analyze & test
     runs-on: ubuntu-24.04

@@ -12,7 +12,7 @@ import '../theme.dart';
 
 const _appVersion = String.fromEnvironment(
   'SCRIBE_VERSION',
-  defaultValue: '1.1.0',
+  defaultValue: '1.1.1',
 );
 
 class _LangOption {

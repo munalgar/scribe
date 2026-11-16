@@ -2,6 +2,14 @@
 
 All notable changes to Scribe are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-11-15
+
+### Fixed
+- Transcription failed for every file in 1.1.0 with `open() got an unexpected keyword argument 'metadata_errors'`. PyAV 19 removed an argument that faster-whisper 1.2.1 relies on; PyAV is now pinned to 18.1.0.
+
+### Added
+- End-to-end transcription test: starts the backend, downloads the `tiny.en` model, transcribes a short English clip, and checks the transcript, edits, history, and deletion. It runs in CI on every push and against each platform's packaged backend before a release is published.
+
 ## [1.1.0] - 2026-11-15
 
 ### Changed
@@ -20,5 +28,6 @@ All notable changes to Scribe are documented here. This project follows [Semanti
 
 - First cross-platform desktop release (macOS arm64, Windows x64, Linux x64) with batch transcription, live editing, translation, local model management, and TXT/SRT/VTT/JSON/CSV export.
 
+[1.1.1]: https://github.com/munalgar/scribe/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/munalgar/scribe/compare/v1.0.4...v1.1.0
 [1.0.4]: https://github.com/munalgar/scribe/releases/tag/v1.0.4

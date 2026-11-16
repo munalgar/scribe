@@ -57,6 +57,8 @@ PYINSTALLER_ARGS=(
     --hidden-import grpc._cython.cygrpc
     --hidden-import faster_whisper
     --hidden-import coloredlogs
+    # faster-whisper loads its Silero VAD model (assets/*.onnx) at runtime
+    --collect-data faster_whisper
     # Working/output dirs
     --distpath "$BACKEND_DIR/dist"
     --workpath "$BACKEND_DIR/build_pyinstaller"

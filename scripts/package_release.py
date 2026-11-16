@@ -213,6 +213,9 @@ def build_backend_binary(platform: str, python: Path) -> Path:
         "faster_whisper",
         "--hidden-import",
         "coloredlogs",
+        # faster-whisper loads its Silero VAD model (assets/*.onnx) at runtime.
+        "--collect-data",
+        "faster_whisper",
         "--distpath",
         str(backend_dist_dir),
         "--workpath",
